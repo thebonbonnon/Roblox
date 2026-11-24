@@ -45,15 +45,26 @@ This project uses [Rojo](https://rojo.space).
 4. Press **Play**. To test teams, use *Test → Clients and Servers* with several players.
 5. Before publishing, set **Max Players = 10** in Game Settings.
 
+## Models
+
+Every unit is built from Roblox parts, with no assets needed: armored heroes with weapons and shields, soldier/caster/cannon-cart minions, castle-style towers, a crystal nexus and leafy trees (256 parts across 11 models).
+
+- The models are defined in `tools/gen_models.py`. Run `python3 tools/gen_models.py` after editing it. It writes `src/shared/ModelSpecs.json` (which the game builds from) and `tools/model-viewer.html`, a 3D preview you can open in a browser.
+- **Swap in your own models (Creator Store, Blender, etc.):** create a folder named `Models` in `ServerStorage` and put a Model inside with one of these names: `Hero_Knight`, `Hero_Mage`, `Hero_Ranger`, `Hero_Guardian`, `Hero_Assassin`, `Minion_melee`, `Minion_caster`, `Minion_siege`, `Tower`, `Nexus`, `Tree`. The game then uses it instead of the built-in one. It is scaled to the same height, scripts inside it are deleted, and any part whose name starts with `Team` is recolored to the team color. Models should face -Z (the front in Studio).
+- Free models can contain malicious scripts. The loader strips them, but still prefer verified creators.
+
 ## Project layout
 
 ```
+tools/
+  gen_models.py    model definitions -> ModelSpecs.json + model-viewer.html
 src/
   shared/          -> ReplicatedStorage.Shared
     Config.lua       tuning values (gold, XP, waves, stats)
     Heroes.lua       hero + ability definitions (add heroes here)
     Items.lua        shop items
     MapData.lua      lane paths, tower/base positions
+    ModelSpecs.json  generated part-by-part model definitions
   server/          -> ServerScriptService.Server
     Main.server.lua  match flow, teams, bots fill, remotes
     Units.lua        unit registry, damage, buffs, health bars
@@ -64,6 +75,7 @@ src/
     Bots.lua         AI heroes
     MapBuilder.lua   procedural map
     Effects.lua      visual effects
+    ModelFactory.lua builds models from ModelSpecs.json or your drop-in Models folder
     Net.lua          RemoteEvents
   client/          -> StarterPlayerScripts.Client
     Main.client.lua  camera, input, click-to-move

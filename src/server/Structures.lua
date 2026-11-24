@@ -5,6 +5,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local MapData = require(ReplicatedStorage.Shared.MapData)
 local Units = require(script.Parent.Units)
 local Effects = require(script.Parent.Effects)
+local ModelFactory = require(script.Parent.ModelFactory)
 
 local Structures = {}
 Structures.towers = {}
@@ -18,60 +19,22 @@ local function unitsFolder()
 	return workspace:WaitForChild("Units")
 end
 
-local function part(props, parent)
-	local p = Instance.new("Part")
-	p.Anchored = true
-	p.TopSurface = Enum.SurfaceType.Smooth
-	p.BottomSurface = Enum.SurfaceType.Smooth
-	for k, v in pairs(props) do
-		p[k] = v
-	end
-	p.Parent = parent
-	return p
-end
-
 local function buildTower(team, lane, tier, pos)
-	local color = Config.TeamColors[team]
-	local gy = Config.GroundY
-	local model = Instance.new("Model")
-	model.Name = string.format("%s %s Tower %d", team, lane, tier)
-
-	local base = part({
-		Name = "Base",
-		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(14, 8, 8),
-		CFrame = CFrame.new(pos.X, gy + 7, pos.Z) * CFrame.Angles(0, 0, math.rad(90)),
-		Color = Color3.fromRGB(120, 120, 130),
-		Material = Enum.Material.Slate,
-	}, model)
-	part({
-		Name = "Band",
-		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(1.2, 8.6, 8.6),
-		CFrame = CFrame.new(pos.X, gy + 12, pos.Z) * CFrame.Angles(0, 0, math.rad(90)),
-		Color = color,
-		Material = Enum.Material.Neon,
-		CanCollide = false,
-	}, model)
-	local crystal = part({
-		Name = "Crystal",
-		Shape = Enum.PartType.Ball,
-		Size = Vector3.one * 3.5,
-		CFrame = CFrame.new(pos.X, gy + 16.5, pos.Z),
-		Color = color,
-		Material = Enum.Material.Neon,
-		CanCollide = false,
-	}, model)
-	model.PrimaryPart = base
+	local model, base, info = ModelFactory.build("Tower", {
+		team = team,
+		name = string.format("%s %s Tower %d", team, lane, tier),
+		cframe = CFrame.new(pos.X, Config.GroundY, pos.Z),
+		static = true,
+	})
 	model.Parent = unitsFolder()
 
 	local s = Config.Tower
 	local u = Units.new({
 		model = model, root = base, team = team, kind = "tower",
 		name = model.Name, maxHp = s.hp, armor = s.armor, damage = s.damage,
-		range = s.range, attackCd = s.attackCd, radius = s.radius, ranged = true, barHeight = 13,
+		range = s.range, attackCd = s.attackCd, radius = s.radius, ranged = true, barHeight = info.barHeight,
 	})
-	u.firePart = crystal
+	u.firePart = info.fire
 	u.lane = lane
 	u.tier = tier
 	return u
@@ -79,31 +42,17 @@ end
 
 local function buildNexus(team)
 	local pos = MapData.Nexus[team]
-	local color = Config.TeamColors[team]
-	local gy = Config.GroundY
-	local model = Instance.new("Model")
-	model.Name = team .. " Nexus"
-	local base = part({
-		Name = "Base",
-		Size = Vector3.new(14, 4, 14),
-		CFrame = CFrame.new(pos.X, gy + 2, pos.Z),
-		Color = Color3.fromRGB(90, 90, 100),
-		Material = Enum.Material.Slate,
-	}, model)
-	part({
-		Name = "Core",
-		Size = Vector3.new(7, 7, 7),
-		CFrame = CFrame.new(pos.X, gy + 9, pos.Z) * CFrame.Angles(math.rad(45), math.rad(45), 0),
-		Color = color,
-		Material = Enum.Material.Neon,
-		CanCollide = false,
-	}, model)
-	model.PrimaryPart = base
+	local model, base, info = ModelFactory.build("Nexus", {
+		team = team,
+		name = team .. " Nexus",
+		cframe = CFrame.new(pos.X, Config.GroundY, pos.Z),
+		static = true,
+	})
 	model.Parent = unitsFolder()
 	local s = Config.Nexus
 	return Units.new({
 		model = model, root = base, team = team, kind = "nexus",
-		name = model.Name, maxHp = s.hp, armor = s.armor, radius = s.radius, barHeight = 12,
+		name = model.Name, maxHp = s.hp, armor = s.armor, radius = s.radius, barHeight = info.barHeight,
 	})
 end
 
@@ -187,6 +136,7 @@ function Structures.step(dt)
 	end
 end
 
+-- Collapse a destroyed structure into rubble: keep its foundation, scatter a few dark blocks.
 local function ruin(u)
 	local model = u.model
 	if not model then
@@ -199,9 +149,24 @@ local function ruin(u)
 			p:Destroy()
 		end
 	end
-	u.root.Color = Color3.fromRGB(50, 50, 55)
-	u.root.Size = Vector3.new(3, u.root.Size.Y, u.root.Size.Z)
-	u.root.CFrame = CFrame.new(pos.X, Config.GroundY + 1.5, pos.Z) * CFrame.Angles(0, 0, math.rad(90))
+	u.root.Color = Color3.fromRGB(55, 55, 60)
+	u.root.Transparency = 0
+	local rng = Random.new()
+	for i = 1, 6 do
+		local rubble = Instance.new("Part")
+		rubble.Name = "Rubble" .. i
+		rubble.Anchored = true
+		rubble.CanCollide = false
+		rubble.Size = Vector3.new(rng:NextNumber(1, 2.5), rng:NextNumber(0.8, 1.8), rng:NextNumber(1, 2.5))
+		rubble.CFrame = CFrame.new(
+			pos.X + rng:NextNumber(-3, 3),
+			u.root.Position.Y + u.root.Size.Y / 2 + rubble.Size.Y / 2 - 0.3,
+			pos.Z + rng:NextNumber(-3, 3)
+		) * CFrame.Angles(0, rng:NextNumber(0, math.pi), rng:NextNumber(-0.3, 0.3))
+		rubble.Color = Color3.fromRGB(70, 70, 76)
+		rubble.Material = Enum.Material.Slate
+		rubble.Parent = model
+	end
 	if u.bar then
 		u.bar:Destroy()
 	end

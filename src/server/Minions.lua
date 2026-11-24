@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local MapData = require(ReplicatedStorage.Shared.MapData)
 local Units = require(script.Parent.Units)
+local ModelFactory = require(script.Parent.ModelFactory)
 
 local flat = Units.flat
 local Minions = {}
@@ -21,35 +22,24 @@ function Minions.spawn(team, lane, minionType)
 	local path = MapData.GetLanePath(lane, team)
 	local start = path[1] + (path[2] - path[1]).Unit * 14
 	local side = Vector3.new(math.random() - 0.5, 0, math.random() - 0.5) * 4
-	local y = Config.GroundY + s.size.Y / 2
-
-	local body = Instance.new("Part")
-	body.Name = "Body"
-	body.Anchored = true
-	body.CanCollide = false
-	body.CanTouch = false
-	body.Size = s.size
-	body.Shape = s.shape == "Ball" and Enum.PartType.Ball or Enum.PartType.Block
-	body.Color = Config.TeamColors[team]:Lerp(Color3.new(0, 0, 0), minionType == "siege" and 0.35 or 0.1)
-	body.Material = Enum.Material.SmoothPlastic
-	body.CFrame = CFrame.lookAt(Vector3.new(start.X + side.X, y, start.Z + side.Z), Vector3.new(path[2].X, y, path[2].Z))
-
-	local model = Instance.new("Model")
-	model.Name = team .. " " .. minionType .. " minion"
-	body.Parent = model
-	model.PrimaryPart = body
+	local ground = Vector3.new(start.X + side.X, Config.GroundY, start.Z + side.Z)
+	local model, body, info = ModelFactory.build("Minion_" .. minionType, {
+		team = team,
+		name = team .. " " .. minionType .. " minion",
+		cframe = CFrame.lookAt(ground, Vector3.new(path[2].X, Config.GroundY, path[2].Z)),
+	})
 	model.Parent = workspace:WaitForChild("Units")
 
 	local u = Units.new({
 		model = model, root = body, team = team, kind = "minion", name = minionType,
 		maxHp = s.hp, damage = s.damage, armor = s.armor, range = s.range, attackCd = s.attackCd,
-		speed = s.speed, radius = s.radius, ranged = s.ranged, barHeight = s.size.Y / 2 + 1.5,
+		speed = s.speed, radius = s.radius, ranged = s.ranged, barHeight = info.barHeight,
 	})
 	u.minionType = minionType
 	u.path = path
 	u.wp = 2
 	u.kinematic = true
-	u.rootY = y
+	u.rootY = Config.GroundY + info.rootY
 	u.moveDir = Vector3.zero
 	Minions.list[u] = true
 	return u

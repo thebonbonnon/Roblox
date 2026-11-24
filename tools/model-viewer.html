@@ -1,0 +1,533 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MOBA Model Viewer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: header, then a model list beside a large 3D stage; parts table under the stage. Stacks on phones. */
+  :root {
+    --bg: #eef1f5;
+    --surface: #ffffff;
+    --fg: #1b2230;
+    --muted: #5d6779;
+    --line: #d6dbe4;
+    --accent: #2f6fe0;
+    --accent-soft: #e2ebfb;
+    --stage: #b9d3ea;
+    --blue: #3c8cff;
+    --red: #eb4646;
+    --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Inter", system-ui, -apple-system, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --surface: #1a202b; --fg: #e6eaf2; --muted: #98a2b5; --line: #2a3242;
+      --accent: #6b9dff; --accent-soft: #233150; --stage: #1d2a3a; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --surface: #1a202b; --fg: #e6eaf2; --muted: #98a2b5; --line: #2a3242;
+    --accent: #6b9dff; --accent-soft: #233150; --stage: #1d2a3a; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 14px; line-height: 1.5;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 20px 32px;
+  }
+  .wrap { max-width: 1240px; margin: 0 auto; display: grid; gap: 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+  h1 { font-family: var(--font-display); font-size: 1.6rem; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+  header p { margin: 2px 0 0; color: var(--muted); max-width: 62ch; }
+  .team-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+  .team-toggle button {
+    font: 600 13px var(--font-body); padding: 8px 14px; border: 0; background: transparent; color: var(--muted); cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .team-toggle button .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .team-toggle button[aria-pressed="true"] { background: var(--accent-soft); color: var(--fg); }
+  .main { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; align-items: start; }
+  nav { display: grid; gap: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  nav h2 { font: 600 11px var(--font-body); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 6px; }
+  nav ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  nav button {
+    width: 100%; text-align: left; font: 500 14px var(--font-body); color: var(--fg); background: transparent;
+    border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px;
+  }
+  nav button small { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+  nav button:hover { background: var(--bg); }
+  nav button[aria-current="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .stage-col { display: grid; gap: 16px; min-width: 0; }
+  .stage {
+    position: relative; width: 100%; aspect-ratio: 16 / 10; max-width: 100%; border-radius: 10px; overflow: hidden;
+    background: var(--stage); border: 1px solid var(--line);
+  }
+  .stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .hint {
+    position: absolute; left: 12px; bottom: 10px; font: 500 12px var(--font-body); color: #fff;
+    background: rgba(10, 16, 26, 0.55); padding: 4px 9px; border-radius: 6px; pointer-events: none;
+  }
+  .stage-tools { position: absolute; right: 10px; top: 10px; display: flex; gap: 6px; }
+  .stage-tools button {
+    font: 600 12px var(--font-body); padding: 6px 10px; border-radius: 6px; border: 0; cursor: pointer;
+    background: rgba(10, 16, 26, 0.6); color: #fff;
+  }
+  .stage-tools button[aria-pressed="true"] { background: var(--accent); }
+  .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-weight: 500; }
+  .info { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; }
+  .info h2 { font-family: var(--font-display); font-size: 1.25rem; margin: 0; }
+  .info .meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 13px; }
+  .info .meta b { color: var(--fg); font-weight: 600; }
+  .info p { margin: 0; max-width: 72ch; }
+  .src { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { text-align: left; font: 600 11px var(--font-body); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); }
+  td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td.mono { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; border: 1px solid rgba(0,0,0,0.15); }
+  details summary { cursor: pointer; font-weight: 600; color: var(--accent); padding: 4px 0; }
+  details[open] summary { margin-bottom: 6px; }
+  .note { color: var(--muted); font-size: 13px; }
+  @media (max-width: 760px) {
+    .main { grid-template-columns: 1fr; }
+    .stage { aspect-ratio: 4 / 3; }
+    nav { order: 2; }
+    nav ul { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>MOBA Model Viewer</h1>
+      <p>Every unit and structure from the game, rebuilt part by part from the Luau source. Sizes are in studs.</p>
+    </div>
+    <div class="team-toggle" role="group" aria-label="Team color">
+      <button id="team-blue" aria-pressed="true" data-team="Blue"><span class="dot" style="background: var(--blue)"></span>Blue team</button>
+      <button id="team-red" aria-pressed="false" data-team="Red"><span class="dot" style="background: var(--red)"></span>Red team</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <nav id="nav" aria-label="Models"></nav>
+    <div class="stage-col">
+      <div class="stage" id="stage">
+        <div class="loading" id="loading">Loading 3D viewer…</div>
+        <div class="stage-tools">
+          <button id="toggle-bars" aria-pressed="true" title="Shown on single models">Health bars</button>
+          <button id="toggle-spin" aria-pressed="true">Auto-rotate</button>
+        </div>
+        <div class="hint">Drag to orbit · scroll or pinch to zoom · right-drag to pan</div>
+      </div>
+      <section class="info" id="info" aria-live="polite"></section>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function () {
+  // ---------------------------------------------------------------- data (mirrors src/shared + src/server)
+  const TEAM = { Blue: [60, 140, 255], Red: [235, 70, 70] };
+  const HEROES = {
+    Knight:   { color: [205, 205, 215], ranged: false, role: "Fighter",  hp: 620, range: 6,   desc: "Durable melee bruiser who charges in and locks down groups.", abil: "Cleave · Rally · Charge · Judgment" },
+    Mage:     { color: [150, 90, 230],  ranged: true,  role: "Mage",     hp: 470, range: 28,  desc: "Fragile long-range caster with huge burst damage.", abil: "Fireball · Frost Nova · Blink · Meteor" },
+    Ranger:   { color: [90, 180, 90],   ranged: true,  role: "Marksman", hp: 510, range: 30,  desc: "Sustained ranged damage. Kites with tumbles and slows.", abil: "Piercing Arrow · Volley · Tumble · Rain of Arrows" },
+    Guardian: { color: [200, 160, 70],  ranged: false, role: "Tank",     hp: 720, range: 6,   desc: "Massive armored tank. Stuns, slows and soaks tower shots.", abil: "Shield Bash · Fortify · Ground Slam · Earthquake" },
+    Assassin: { color: [60, 60, 70],    ranged: false, role: "Assassin", hp: 530, range: 5.5, desc: "Fast melee killer that dives and executes low-health heroes.", abil: "Shadow Strike · Smoke Veil · Poison Blade · Execute" },
+  };
+  const MINIONS = {
+    melee:  { hp: 340, range: 3.5, desc: "Small armored soldier with a sword and round shield. Three spawn per lane every wave." },
+    caster: { hp: 230, range: 18, desc: "Hooded spellcaster with a glowing wand that fires team-colored bolts. Two per wave." },
+    siege:  { hp: 750, range: 22, desc: "Wheeled cannon cart that joins every third wave and outranges towers' minion screen." },
+  };
+  const GRASS = [78, 130, 62], LANE = [196, 170, 120], RIVER = [70, 140, 190];
+  const lerp = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  const BLACK = [0, 0, 0], WHITE = [255, 255, 255];
+
+  // Model specs come straight from src/shared/ModelSpecs.json (generated by tools/gen_models.py),
+  // the same file the game builds its models from.
+  const SPECS = {"Hero_Knight":{"root":"Torso","barTop":7.4,"height":6.47,"parts":[{"name":"LegL","shape":"box","size":[1,2,1],"pos":[-0.5,1,0],"color":[170,176,188],"material":"Metal"},{"name":"BootL","shape":"box","size":[1.06,0.55,1.16],"pos":[-0.5,0.28,-0.04],"color":[88,92,104],"material":"Metal"},{"name":"KneeL","shape":"box","size":[0.6,0.4,0.12],"pos":[-0.5,1.25,-0.53],"color":[88,92,104],"material":"Metal"},{"name":"LegR","shape":"box","size":[1,2,1],"pos":[0.5,1,0],"color":[170,176,188],"material":"Metal"},{"name":"BootR","shape":"box","size":[1.06,0.55,1.16],"pos":[0.5,0.28,-0.04],"color":[88,92,104],"material":"Metal"},{"name":"KneeR","shape":"box","size":[0.6,0.4,0.12],"pos":[0.5,1.25,-0.53],"color":[88,92,104],"material":"Metal"},{"name":"Torso","shape":"box","size":[2,2,1],"pos":[0,3,0],"color":[170,176,188],"material":"Metal"},{"name":"Tabard","shape":"box","size":[1.5,1.95,0.08],"pos":[0,2.95,-0.54],"color":"team","material":"Fabric"},{"name":"TabardCross","shape":"box","size":[0.3,1.2,0.04],"pos":[0,3.15,-0.6],"color":[236,236,236],"material":"Fabric"},{"name":"TabardCrossBar","shape":"box","size":[0.9,0.3,0.04],"pos":[0,3.35,-0.6],"color":[236,236,236],"material":"Fabric"},{"name":"Belt","shape":"box","size":[2.06,0.3,1.06],"pos":[0,2.15,0],"color":[112,74,42],"material":"Fabric"},{"name":"Buckle","shape":"box","size":[0.35,0.3,0.08],"pos":[0,2.15,-0.57],"color":[232,188,74],"material":"Metal"},{"name":"ArmL","shape":"box","size":[1,2,1],"pos":[-1.5,3,0],"color":[170,176,188],"material":"Metal"},{"name":"PauldronL","shape":"box","size":[1.4,0.55,1.4],"pos":[-1.56,4.05,0],"color":[170,176,188],"material":"Metal"},{"name":"PauldronTrimL","shape":"box","size":[1.46,0.16,1.46],"pos":[-1.56,3.75,0],"color":"team","material":"Metal"},{"name":"GauntletL","shape":"box","size":[1.08,0.6,1.08],"pos":[-1.5,2.25,0],"color":[88,92,104],"material":"Metal"},{"name":"ArmR","shape":"box","size":[1,2,1],"pos":[1.5,3,0],"color":[170,176,188],"material":"Metal"},{"name":"PauldronR","shape":"box","size":[1.4,0.55,1.4],"pos":[1.56,4.05,0],"color":[170,176,188],"material":"Metal"},{"name":"PauldronTrimR","shape":"box","size":[1.46,0.16,1.46],"pos":[1.56,3.75,0],"color":"team","material":"Metal"},{"name":"GauntletR","shape":"box","size":[1.08,0.6,1.08],"pos":[1.5,2.25,0],"color":[88,92,104],"material":"Metal"},{"name":"Head","shape":"cyl","size":[1.2,1.3],"pos":[0,4.6,0],"color":[234,196,160],"material":"SmoothPlastic"},{"name":"Helmet","shape":"cyl","size":[1.4,1.48],"pos":[0,4.68,0],"color":[170,176,188],"material":"Metal"},{"name":"HelmetDome","shape":"ball","size":[1.48],"pos":[0,5.3,0],"color":[170,176,188],"material":"Metal"},{"name":"Visor","shape":"box","size":[1.0,0.14,0.08],"pos":[0,4.72,-0.74],"color":[22,22,26],"material":"SmoothPlastic"},{"name":"VisorRidge","shape":"box","size":[0.14,0.9,0.1],"pos":[0,4.55,-0.74],"color":[88,92,104],"material":"Metal"},{"name":"Plume","shape":"box","size":[0.22,0.75,1.3],"pos":[0,6.1,0.1],"color":"team","material":"Fabric"},{"name":"SwordGrip","shape":"box","size":[0.24,0.24,0.8],"pos":[1.5,2.0,-0.45],"color":[70,46,28],"material":"SmoothPlastic"},{"name":"SwordPommel","shape":"ball","size":[0.36],"pos":[1.5,2.0,-0.02],"color":[232,188,74],"material":"Metal"},{"name":"SwordGuard","shape":"box","size":[0.95,0.2,0.22],"pos":[1.5,2.0,-0.92],"color":[232,188,74],"material":"Metal"},{"name":"SwordBlade","shape":"box","size":[0.32,0.1,3.2],"pos":[1.5,2.0,-2.6],"color":[222,228,238],"material":"Metal"},{"name":"SwordTip","shape":"wedge","size":[0.1,0.32,0.45],"pos":[1.5,2.0,-4.42],"color":[222,228,238],"material":"Metal","rot":[0,0,90]},{"name":"Shield","shape":"box","size":[0.25,2.2,1.7],"pos":[-2.15,3.1,-0.1],"color":"team","material":"Metal"},{"name":"ShieldPointA","shape":"wedge","size":[0.25,0.8,0.85],"pos":[-2.15,1.6,-0.525],"color":"team","material":"Metal","rot":[0,0,180]},{"name":"ShieldPointB","shape":"wedge","size":[0.25,0.8,0.85],"pos":[-2.15,1.6,0.325],"color":"team","material":"Metal","rot":[180,0,0]},{"name":"ShieldRim","shape":"box","size":[0.28,0.16,1.78],"pos":[-2.15,4.18,-0.1],"color":[232,188,74],"material":"Metal"},{"name":"ShieldBandV","shape":"box","size":[0.28,2.0,0.24],"pos":[-2.17,3.0,-0.1],"color":[236,236,236],"material":"Metal"},{"name":"ShieldBandH","shape":"box","size":[0.28,0.24,1.5],"pos":[-2.17,3.4,-0.1],"color":[236,236,236],"material":"Metal"}]},"Hero_Mage":{"root":"Torso","barTop":8.0,"height":7.23,"parts":[{"name":"Skirt","shape":"box","size":[2.15,2.1,1.35],"pos":[0,1.05,0],"color":[104,58,176],"material":"Fabric"},{"name":"SkirtFlare","shape":"box","size":[2.45,0.7,1.6],"pos":[0,0.35,0],"color":[104,58,176],"material":"Fabric"},{"name":"Hem","shape":"box","size":[2.5,0.2,1.65],"pos":[0,0.1,0],"color":"team","material":"Fabric"},{"name":"Torso","shape":"box","size":[2,2,1],"pos":[0,3,0],"color":[104,58,176],"material":"Fabric"},{"name":"Sash","shape":"box","size":[0.4,2.7,1.04],"pos":[0,3.0,0],"color":"team","material":"Fabric","rot":[0,0,35]},{"name":"Belt","shape":"box","size":[2.06,0.26,1.06],"pos":[0,2.1,0],"color":[232,188,74],"material":"Metal"},{"name":"Collar","shape":"box","size":[2.1,0.3,1.1],"pos":[0,3.95,0],"color":[168,120,232],"material":"Fabric"},{"name":"ArmL","shape":"box","size":[1,2,1],"pos":[-1.5,3,0],"color":[104,58,176],"material":"Fabric"},{"name":"CuffL","shape":"box","size":[1.24,0.55,1.24],"pos":[-1.5,2.25,0],"color":[168,120,232],"material":"Fabric"},{"name":"HandL","shape":"box","size":[0.8,0.5,0.8],"pos":[-1.5,1.75,0],"color":[234,196,160],"material":"SmoothPlastic"},{"name":"ArmR","shape":"box","size":[1,2,1],"pos":[1.5,3,0],"color":[104,58,176],"material":"Fabric"},{"name":"CuffR","shape":"box","size":[1.24,0.55,1.24],"pos":[1.5,2.25,0],"color":[168,120,232],"material":"Fabric"},{"name":"HandR","shape":"box","size":[0.8,0.5,0.8],"pos":[1.5,1.75,0],"color":[234,196,160],"material":"SmoothPlastic"},{"name":"Head","shape":"cyl","size":[1.2,1.3],"pos":[0,4.6,0],"color":[234,196,160],"material":"SmoothPlastic"},{"name":"EyeL","shape":"box","size":[0.18,0.22,0.05],"pos":[-0.28,4.75,-0.66],"color":[22,22,26],"material":"SmoothPlastic"},{"name":"EyeR","shape":"box","size":[0.18,0.22,0.05],"pos":[0.28,4.75,-0.66],"color":[22,22,26],"material":"SmoothPlastic"},{"name":"Beard","shape":"box","size":[1.0,0.9,0.3],"pos":[0,4.1,-0.58],"color":[236,236,236],"material":"Fabric"},{"name":"BeardTip","shape":"box","size":[0.6,0.45,0.28],"pos":[0,3.45,-0.58],"color":[236,236,236],"material":"Fabric"},{"name":"HatBrim","shape":"cyl","size":[0.16,2.8],"pos":[0,5.25,0],"color":[70,36,128],"material":"Fabric"},{"name":"HatBand","shape":"cyl","size":[0.24,1.66],"pos":[0,5.44,0],"color":"team","material":"Fabric"},{"name":"HatLow","shape":"cyl","size":[0.55,1.6],"pos":[0,5.6,0],"color":[70,36,128],"material":"Fabric"},{"name":"HatMid","shape":"cyl","size":[0.6,1.2],"pos":[0.05,6.15,0.05],"color":[70,36,128],"material":"Fabric","rot":[6,0,-6]},{"name":"HatHigh","shape":"cyl","size":[0.55,0.8],"pos":[0.15,6.65,0.12],"color":[70,36,128],"material":"Fabric","rot":[12,0,-14]},{"name":"HatStar","shape":"ball","size":[0.42],"pos":[0.3,7.02,0.22],"color":[232,188,74],"material":"Neon"},{"name":"Staff","shape":"box","size":[0.24,5.4,0.24],"pos":[1.5,2.6,-0.55],"color":[120,82,48],"material":"Wood"},{"name":"StaffRing","shape":"cyl","size":[0.14,1.05],"pos":[1.5,5.4,-0.55],"color":[232,188,74],"material":"Metal","rot":[90,0,0]},{"name":"StaffClawL","shape":"box","size":[0.14,0.6,0.14],"pos":[1.15,5.55,-0.55],"color":[232,188,74],"material":"Metal","rot":[0,0,25]},{"name":"StaffClawR","shape":"box","size":[0.14,0.6,0.14],"pos":[1.85,5.55,-0.55],"color":[232,188,74],"material":"Metal","rot":[0,0,-25]},{"name":"StaffOrb","shape":"ball","size":[0.8],"pos":[1.5,5.45,-0.55],"color":[196,130,255],"material":"Neon"},{"name":"HandOrb","shape":"ball","size":[0.55],"pos":[-1.5,1.25,-0.25],"color":[196,130,255],"material":"Neon","alpha":0.25}]},"Hero_Ranger":{"root":"Torso","barTop":7.0,"height":6.05,"parts":[{"name":"LegL","shape":"box","size":[1,2,1],"pos":[-0.5,1,0],"color":[96,72,46],"material":"Fabric"},{"name":"BootL","shape":"box","size":[1.06,0.8,1.12],"pos":[-0.5,0.4,-0.03],"color":[70,46,28],"material":"Fabric"},{"name":"LegR","shape":"box","size":[1,2,1],"pos":[0.5,1,0],"color":[96,72,46],"material":"Fabric"},{"name":"BootR","shape":"box","size":[1.06,0.8,1.12],"pos":[0.5,0.4,-0.03],"color":[70,46,28],"material":"Fabric"},{"name":"Torso","shape":"box","size":[2,2,1],"pos":[0,3,0],"color":[64,122,62],"material":"Fabric"},{"name":"TunicSkirt","shape":"box","size":[2.08,0.5,1.08],"pos":[0,1.85,0],"color":[64,122,62],"material":"Fabric"},{"name":"Belt","shape":"box","size":[2.08,0.25,1.08],"pos":[0,2.15,0],"color":[112,74,42],"material":"Fabric"},{"name":"Strap","shape":"box","size":[0.3,2.6,1.06],"pos":[0,3.0,0],"color":[112,74,42],"material":"Fabric","rot":[0,0,-38]},{"name":"ArmL","shape":"box","size":[1,2,1],"pos":[-1.5,3,0],"color":[64,122,62],"material":"Fabric"},{"name":"BracerL","shape":"box","size":[1.08,0.7,1.08],"pos":[-1.5,2.3,0],"color":[112,74,42],"material":"Fabric"},{"name":"HandL","shape":"box","size":[0.8,0.4,0.8],"pos":[-1.5,1.8,0],"color":[234,196,160],"material":"SmoothPlastic"},{"name":"ArmR","shape":"box","size":[1,2,1],"pos":[1.5,3,0],"color":[64,122,62],"material":"Fabric"},{"name":"BracerR","shape":"box","size":[1.08,0.7,1.08],"pos":[1.5,2.3,0],"color":[112,74,42],"material":"Fabric"},{"name":"HandR","shape":"box","size":[0.8,0.4,0.8],"pos":[1.5,1.8,0],"color":[234,196,160],"material":"SmoothPlastic"},{"name":"Head","shape":"cyl","size":[1.2,1.3],"pos":[0,4.6,0],"color":[234,196,160],"material":"SmoothPlastic"},{"name":"EyeL","shape":"box","size":[0.18,0.22,0.05],"pos":[-0.28,4.7,-0.66],"color":[22,22,26],"material":"SmoothPlastic"},{"name":"EyeR","shape":"box","size":[0.18,0.22,0.05],"pos":[0.28,4.7,-0.66],"color":[22,22,26],"material":"SmoothPlastic"},{"name":"Hood","shape":"cyl","size":[1.45,1.6],"pos":[0,4.72,0.2],"color":[36,78,42],"material":"Fabric"},{"name":"HoodPeak","shape":"wedge","size":[1.1,0.7,1.0],"pos":[0,5.7,0.55],"color":[36,78,42],"material":"Fabric"},{"name":"HoodRim","shape":"box","size":[1.62,0.2,0.5],"pos":[0,5.35,-0.4],"color":[36,78,42],"material":"Fabric"},{"name":"Cape","shape":"box","size":[1.9,2.8,0.1],"pos":[0,2.75,0.68],"color":"team","material":"Fabric","rot":[7,0,0]},{"name":"Quiver","shape":"cyl","size":[2.3,0.7],"pos":[0.55,3.4,0.82],"color":[112,74,42],"material":"Fabric","rot":[0,0,-18]},{"name":"Arrow0","shape":"box","size":[0.08,0.9,0.08],"pos":[0.86,4.8,0.772],"color":[120,82,48],"material":"Wood","rot":[0,0,-18]},{"name":"Fletch0","shape":"box","size":[0.06,0.4,0.26],"pos":[1.0,5.2,0.772],"color":"team","material":"Fabric","rot":[0,0,-18]},{"name":"Arrow1","shape":"box","size":[0.08,0.9,0.08],"pos":[1.06,4.8,0.852],"color":[120,82,48],"material":"Wood","rot":[0,0,-18]},{"name":"Fletch1","shape":"box","size":[0.06,0.4,0.26],"pos":[1.2,5.2,0.852],"color":"team","material":"Fabric","rot":[0,0,-18]},{"name":"Arrow2","shape":"box","size":[0.08,0.9,0.08],"pos":[1.24,4.8,0.924],"color":[120,82,48],"material":"Wood","rot":[0,0,-18]},{"name":"Fletch2","shape":"box","size":[0.06,0.4,0.26],"pos":[1.38,5.2,0.924],"color":"team","material":"Fabric","rot":[0,0,-18]},{"name":"BowGrip","shape":"box","size":[0.22,0.8,0.28],"pos":[-1.5,2.2,-0.7],"color":[70,46,28],"material":"SmoothPlastic"},{"name":"BowUpper","shape":"box","size":[0.18,1.9,0.2],"pos":[-1.5,3.493,-0.375],"color":[120,82,48],"material":"Wood","rot":[20,0,0]},{"name":"BowLower","shape":"box","size":[0.18,1.9,0.2],"pos":[-1.5,0.907,-0.375],"color":[120,82,48],"material":"Wood","rot":[-20,0,0]},{"name":"BowString","shape":"box","size":[0.04,3.6,0.04],"pos":[-1.5,2.2,-0.05],"color":[236,236,236],"material":"SmoothPlastic"}]},"Hero_Guardian":{"root":"Torso","barTop":7.8,"height":6.75,"parts":[{"name":"LegL","shape":"box","size":[1.2,2.1,1.2],"pos":[-0.65,1.05,0],"color":[150,108,48],"material":"Metal"},{"name":"BootL","shape":"box","size":[1.3,0.6,1.4],"pos":[-0.65,0.3,-0.06],"color":[212,170,72],"material":"Metal"},{"name":"LegR","shape":"box","size":[1.2,2.1,1.2],"pos":[0.65,1.05,0],"color":[150,108,48],"material":"Metal"},{"name":"BootR","shape":"box","size":[1.3,0.6,1.4],"pos":[0.65,0.3,-0.06],"color":[212,170,72],"material":"Metal"},{"name":"Torso","shape":"box","size":[2.6,2.4,1.5],"pos":[0,3.3,0],"color":[212,170,72],"material":"Metal"},{"name":"Chest","shape":"box","size":[2.2,1.2,0.12],"pos":[0,3.8,-0.8],"color":[150,108,48],"material":"Metal"},{"name":"Emblem","shape":"box","size":[0.85,0.85,0.1],"pos":[0,3.6,-0.88],"color":"team","material":"Neon","rot":[0,0,45]},{"name":"Belt","shape":"box","size":[2.66,0.35,1.56],"pos":[0,2.25,0],"color":[150,108,48],"material":"Metal"},{"name":"Fauld","shape":"box","size":[1.6,0.7,0.12],"pos":[0,1.85,-0.78],"color":"team","material":"Fabric"},{"name":"ArmL","shape":"box","size":[1.2,2.3,1.2],"pos":[-1.9,3.2,0],"color":[150,108,48],"material":"Metal"},{"name":"PauldronL","shape":"ball","size":[1.75],"pos":[-1.938,4.35,0],"color":[212,170,72],"material":"Metal"},{"name":"SpikeL","shape":"wedge","size":[0.3,0.7,0.5],"pos":[-2.052,5.35,0],"color":[236,226,200],"material":"SmoothPlastic","rot":[0,-90,0]},{"name":"GauntletL","shape":"box","size":[1.3,0.7,1.3],"pos":[-1.9,2.3,0],"color":[212,170,72],"material":"Metal"},{"name":"ArmR","shape":"box","size":[1.2,2.3,1.2],"pos":[1.9,3.2,0],"color":[150,108,48],"material":"Metal"},{"name":"PauldronR","shape":"ball","size":[1.75],"pos":[1.938,4.35,0],"color":[212,170,72],"material":"Metal"},{"name":"SpikeR","shape":"wedge","size":[0.3,0.7,0.5],"pos":[2.052,5.35,0],"color":[236,226,200],"material":"SmoothPlastic","rot":[0,90,0]},{"name":"GauntletR","shape":"box","size":[1.3,0.7,1.3],"pos":[1.9,2.3,0],"color":[212,170,72],"material":"Metal"},{"name":"Helmet","shape":"box","size":[1.7,1.6,1.7],"pos":[0,5.3,0],"color":[150,108,48],"material":"Metal"},{"name":"HelmetCrest","shape":"box","size":[0.3,0.35,1.8],"pos":[0,6.25,0],"color":[212,170,72],"material":"Metal"},{"name":"VisorSlit","shape":"box","size":[1.2,0.16,0.08],"pos":[0,5.4,-0.86],"color":"team","material":"Neon"},{"name":"HornL","shape":"box","size":[0.3,1.2,0.3],"pos":[-1.05,6.15,0],"color":[236,226,200],"material":"SmoothPlastic","rot":[0,0,30]},{"name":"HornR","shape":"box","size":[0.3,1.2,0.3],"pos":[1.05,6.15,0],"color":[236,226,200],"material":"SmoothPlastic","rot":[0,0,-30]},{"name":"Shield","shape":"box","size":[0.4,3.6,2.4],"pos":[-2.75,3.0,-0.5],"color":"team","material":"Metal","rot":[0,-10,0]},{"name":"ShieldFrameTop","shape":"box","size":[0.44,0.25,2.5],"pos":[-2.75,4.85,-0.5],"color":[212,170,72],"material":"Metal","rot":[0,-10,0]},{"name":"ShieldFrameBot","shape":"box","size":[0.44,0.25,2.5],"pos":[-2.75,1.15,-0.5],"color":[212,170,72],"material":"Metal","rot":[0,-10,0]},{"name":"ShieldBoss","shape":"ball","size":[0.9],"pos":[-2.98,3.0,-0.55],"color":[212,170,72],"material":"Metal"},{"name":"HammerHandle","shape":"box","size":[0.3,3.4,0.3],"pos":[1.9,2.6,-0.75],"color":[120,82,48],"material":"Wood"},{"name":"HammerHead","shape":"box","size":[0.9,1.0,1.8],"pos":[1.9,4.3,-0.75],"color":[88,92,104],"material":"Metal"},{"name":"HammerBand","shape":"box","size":[0.95,1.05,0.3],"pos":[1.9,4.3,-0.75],"color":[212,170,72],"material":"Metal"}]},"Hero_Assassin":{"root":"Torso","barTop":7.0,"height":6.12,"parts":[{"name":"LegL","shape":"box","size":[0.9,2,0.9],"pos":[-0.45,1,0],"color":[48,48,60],"material":"Fabric"},{"name":"WrapL","shape":"box","size":[0.94,0.25,0.94],"pos":[-0.45,1.2,0],"color":"teamDark","material":"Fabric"},{"name":"BootL","shape":"box","size":[0.96,0.6,1.0],"pos":[-0.45,0.3,-0.03],"color":[26,26,32],"material":"Fabric"},{"name":"LegR","shape":"box","size":[0.9,2,0.9],"pos":[0.45,1,0],"color":[48,48,60],"material":"Fabric"},{"name":"WrapR","shape":"box","size":[0.94,0.25,0.94],"pos":[0.45,1.2,0],"color":"teamDark","material":"Fabric"},{"name":"BootR","shape":"box","size":[0.96,0.6,1.0],"pos":[0.45,0.3,-0.03],"color":[26,26,32],"material":"Fabric"},{"name":"Torso","shape":"box","size":[1.8,2,0.9],"pos":[0,3,0],"color":[48,48,60],"material":"Fabric"},{"name":"Vest","shape":"box","size":[1.6,1.6,0.08],"pos":[0,3.1,-0.48],"color":[26,26,32],"material":"Fabric"},{"name":"Belt","shape":"box","size":[1.86,0.25,0.96],"pos":[0,2.1,0],"color":[26,26,32],"material":"Fabric"},{"name":"PouchL","shape":"box","size":[0.4,0.4,0.3],"pos":[-0.6,2.0,-0.55],"color":[112,74,42],"material":"SmoothPlastic"},{"name":"PouchR","shape":"box","size":[0.4,0.4,0.3],"pos":[0.6,2.0,-0.55],"color":[112,74,42],"material":"SmoothPlastic"},{"name":"ArmL","shape":"box","size":[0.85,2,0.85],"pos":[-1.32,3,0],"color":[48,48,60],"material":"Fabric"},{"name":"BracerL","shape":"box","size":[0.92,0.6,0.92],"pos":[-1.32,2.3,0],"color":[26,26,32],"material":"Fabric"},{"name":"GripL","shape":"box","size":[0.2,0.2,0.6],"pos":[-1.32,1.95,-0.35],"color":[70,46,28],"material":"SmoothPlastic"},{"name":"GuardL","shape":"box","size":[0.55,0.15,0.15],"pos":[-1.32,1.95,-0.7],"color":[88,92,104],"material":"Metal"},{"name":"DaggerL","shape":"box","size":[0.22,0.08,1.6],"pos":[-1.32,1.95,-1.55],"color":[222,228,238],"material":"Metal"},{"name":"ArmR","shape":"box","size":[0.85,2,0.85],"pos":[1.32,3,0],"color":[48,48,60],"material":"Fabric"},{"name":"BracerR","shape":"box","size":[0.92,0.6,0.92],"pos":[1.32,2.3,0],"color":[26,26,32],"material":"Fabric"},{"name":"GripR","shape":"box","size":[0.2,0.2,0.6],"pos":[1.32,1.95,-0.35],"color":[70,46,28],"material":"SmoothPlastic"},{"name":"GuardR","shape":"box","size":[0.55,0.15,0.15],"pos":[1.32,1.95,-0.7],"color":[88,92,104],"material":"Metal"},{"name":"DaggerR","shape":"box","size":[0.22,0.08,1.6],"pos":[1.32,1.95,-1.55],"color":[222,228,238],"material":"Metal"},{"name":"Head","shape":"cyl","size":[1.2,1.25],"pos":[0,4.6,0],"color":[234,196,160],"material":"SmoothPlastic"},{"name":"Hood","shape":"cyl","size":[1.45,1.5],"pos":[0,4.72,0.15],"color":[26,26,32],"material":"Fabric"},{"name":"HoodPeak","shape":"wedge","size":[1.0,0.75,1.0],"pos":[0,5.75,0.45],"color":[26,26,32],"material":"Fabric"},{"name":"Mask","shape":"box","size":[1.3,0.6,0.08],"pos":[0,4.35,-0.64],"color":[22,22,26],"material":"Fabric"},{"name":"EyeL","shape":"box","size":[0.3,0.1,0.05],"pos":[-0.28,4.8,-0.64],"color":"team","material":"Neon"},{"name":"EyeR","shape":"box","size":[0.3,0.1,0.05],"pos":[0.28,4.8,-0.64],"color":"team","material":"Neon"},{"name":"Scarf","shape":"box","size":[1.55,0.4,1.1],"pos":[0,4.0,0],"color":"team","material":"Fabric"},{"name":"ScarfTail","shape":"box","size":[0.4,1.6,0.08],"pos":[0.45,3.3,0.62],"color":"team","material":"Fabric","rot":[18,0,-8]}]},"Minion_melee":{"root":"Body","barTop":4.0,"height":3.35,"parts":[{"name":"LegL","shape":"box","size":[0.5,0.9,0.55],"pos":[-0.32,0.45,0],"color":"teamDark","material":"SmoothPlastic"},{"name":"LegR","shape":"box","size":[0.5,0.9,0.55],"pos":[0.32,0.45,0],"color":"teamDark","material":"SmoothPlastic"},{"name":"Body","shape":"box","size":[1.4,1.2,0.95],"pos":[0,1.5,0],"color":"team","material":"SmoothPlastic"},{"name":"Belt","shape":"box","size":[1.44,0.2,1.0],"pos":[0,1.0,0],"color":[112,74,42],"material":"SmoothPlastic"},{"name":"Chest","shape":"box","size":[1.0,0.7,0.08],"pos":[0,1.6,-0.5],"color":[170,176,188],"material":"Metal"},{"name":"Head","shape":"ball","size":[1.05],"pos":[0,2.55,0],"color":[170,176,188],"material":"Metal"},{"name":"Visor","shape":"box","size":[0.7,0.14,0.1],"pos":[0,2.55,-0.48],"color":"teamLight","material":"Neon"},{"name":"Crest","shape":"box","size":[0.15,0.4,0.8],"pos":[0,3.15,0.05],"color":"team","material":"Fabric"},{"name":"ArmL","shape":"box","size":[0.4,1.0,0.45],"pos":[-0.88,1.55,0],"color":"team","material":"SmoothPlastic"},{"name":"ArmR","shape":"box","size":[0.4,1.0,0.45],"pos":[0.88,1.55,0],"color":"team","material":"SmoothPlastic"},{"name":"Sword","shape":"box","size":[0.16,0.1,1.5],"pos":[0.88,1.1,-0.85],"color":[222,228,238],"material":"Metal"},{"name":"SwordGuard","shape":"box","size":[0.4,0.1,0.12],"pos":[0.88,1.1,-0.15],"color":[232,188,74],"material":"Metal"},{"name":"Shield","shape":"cyl","size":[0.16,1.25],"pos":[-1.15,1.6,-0.1],"color":"team","material":"Metal","rot":[0,0,90]},{"name":"ShieldBoss","shape":"ball","size":[0.4],"pos":[-1.25,1.6,-0.1],"color":[170,176,188],"material":"Metal"}]},"Minion_caster":{"root":"Body","barTop":3.8,"height":3.1,"parts":[{"name":"RobeLow","shape":"cyl","size":[0.8,1.7],"pos":[0,0.4,0],"color":"teamDark","material":"Fabric"},{"name":"Body","shape":"cyl","size":[0.9,1.35],"pos":[0,1.2,0],"color":"team","material":"Fabric"},{"name":"Collar","shape":"cyl","size":[0.2,1.1],"pos":[0,1.72,0],"color":[232,188,74],"material":"Metal"},{"name":"Head","shape":"ball","size":[0.95],"pos":[0,2.2,0],"color":"teamDark","material":"Fabric"},{"name":"Hood","shape":"wedge","size":[0.8,0.6,0.7],"pos":[0,2.8,0.15],"color":"teamDark","material":"Fabric"},{"name":"EyeL","shape":"box","size":[0.16,0.12,0.05],"pos":[-0.18,2.25,-0.46],"color":"teamLight","material":"Neon"},{"name":"EyeR","shape":"box","size":[0.16,0.12,0.05],"pos":[0.18,2.25,-0.46],"color":"teamLight","material":"Neon"},{"name":"Wand","shape":"box","size":[0.12,1.6,0.12],"pos":[0.75,1.4,-0.35],"color":[120,82,48],"material":"Wood"},{"name":"Orb","shape":"ball","size":[0.55],"pos":[0.75,2.35,-0.35],"color":"teamLight","material":"Neon"},{"name":"OrbGlow","shape":"ball","size":[0.95],"pos":[0.75,2.35,-0.35],"color":"teamLight","material":"Neon","alpha":0.7}]},"Minion_siege":{"root":"Body","barTop":4.6,"height":4.05,"parts":[{"name":"Body","shape":"box","size":[2.4,0.7,3.6],"pos":[0,1.2,0],"color":[120,82,48],"material":"Wood"},{"name":"Deck","shape":"box","size":[2.2,0.2,3.4],"pos":[0,1.65,0],"color":[100,68,40],"material":"Wood"},{"name":"ArmorL","shape":"box","size":[0.1,0.65,3.2],"pos":[-1.26,1.25,0],"color":"team","material":"Metal"},{"name":"WheelLF","shape":"cyl","size":[0.4,1.5],"pos":[-1.424,0.75,-1.15],"color":[64,46,30],"material":"Wood","rot":[0,0,90]},{"name":"HubLF","shape":"cyl","size":[0.5,0.45],"pos":[-1.424,0.75,-1.15],"color":[88,92,104],"material":"Metal","rot":[0,0,90]},{"name":"WheelLB","shape":"cyl","size":[0.4,1.5],"pos":[-1.424,0.75,1.15],"color":[64,46,30],"material":"Wood","rot":[0,0,90]},{"name":"HubLB","shape":"cyl","size":[0.5,0.45],"pos":[-1.424,0.75,1.15],"color":[88,92,104],"material":"Metal","rot":[0,0,90]},{"name":"ArmorR","shape":"box","size":[0.1,0.65,3.2],"pos":[1.26,1.25,0],"color":"team","material":"Metal"},{"name":"WheelRF","shape":"cyl","size":[0.4,1.5],"pos":[1.424,0.75,-1.15],"color":[64,46,30],"material":"Wood","rot":[0,0,90]},{"name":"HubRF","shape":"cyl","size":[0.5,0.45],"pos":[1.424,0.75,-1.15],"color":[88,92,104],"material":"Metal","rot":[0,0,90]},{"name":"WheelRB","shape":"cyl","size":[0.4,1.5],"pos":[1.424,0.75,1.15],"color":[64,46,30],"material":"Wood","rot":[0,0,90]},{"name":"HubRB","shape":"cyl","size":[0.5,0.45],"pos":[1.424,0.75,1.15],"color":[88,92,104],"material":"Metal","rot":[0,0,90]},{"name":"Mount","shape":"box","size":[1.2,0.6,1.2],"pos":[0,2.0,0.3],"color":[88,92,104],"material":"Metal"},{"name":"Barrel","shape":"cyl","size":[2.8,0.85],"pos":[0,2.45,-0.9],"color":[60,62,70],"material":"Metal","rot":[90,0,0]},{"name":"Muzzle","shape":"cyl","size":[0.35,1.1],"pos":[0,2.45,-2.25],"color":[60,62,70],"material":"Metal","rot":[90,0,0]},{"name":"BarrelBand","shape":"cyl","size":[0.25,1.0],"pos":[0,2.45,-0.6],"color":"team","material":"Metal","rot":[90,0,0]},{"name":"Breech","shape":"ball","size":[1.05],"pos":[0,2.45,0.55],"color":[60,62,70],"material":"Metal"},{"name":"FlagPole","shape":"box","size":[0.12,2.4,0.12],"pos":[0.95,2.85,1.55],"color":[120,82,48],"material":"Wood"},{"name":"Flag","shape":"box","size":[0.05,0.75,1.0],"pos":[0.95,3.6,2.05],"color":"team","material":"Fabric"}]},"Tower":{"root":"Base","barTop":21,"height":18.35,"parts":[{"name":"Base","shape":"box","size":[9,1.5,9],"pos":[0,0.75,0],"color":[92,92,102],"material":"Cobblestone","collide":true},{"name":"Step","shape":"box","size":[7.4,1.0,7.4],"pos":[0,2.0,0],"color":[128,128,138],"material":"Cobblestone","collide":true},{"name":"Shaft","shape":"cyl","size":[10.5,6],"pos":[0,7.75,0],"color":[128,128,138],"material":"Slate","collide":true},{"name":"BandLow","shape":"cyl","size":[0.6,6.4],"pos":[0,3.9,0],"color":[158,158,166],"material":"Slate"},{"name":"BandHigh","shape":"cyl","size":[0.6,6.4],"pos":[0,10.4,0],"color":[158,158,166],"material":"Slate"},{"name":"Banner0","shape":"box","size":[1.7,4.2,0.1],"pos":[0,7.5,-3.05],"color":"team","material":"Fabric","rot":[0,0,0]},{"name":"BannerRod0","shape":"box","size":[2.0,0.18,0.18],"pos":[0,9.65,-3.11],"color":[232,188,74],"material":"Metal","rot":[0,0,0]},{"name":"Banner1","shape":"box","size":[1.7,4.2,0.1],"pos":[0,7.5,3.05],"color":"team","material":"Fabric","rot":[0,180,0]},{"name":"BannerRod1","shape":"box","size":[2.0,0.18,0.18],"pos":[0,9.65,3.11],"color":[232,188,74],"material":"Metal","rot":[0,180,0]},{"name":"Banner2","shape":"box","size":[1.7,4.2,0.1],"pos":[3.05,7.5,0],"color":"team","material":"Fabric","rot":[0,90,0]},{"name":"BannerRod2","shape":"box","size":[2.0,0.18,0.18],"pos":[3.11,9.65,0],"color":[232,188,74],"material":"Metal","rot":[0,90,0]},{"name":"Banner3","shape":"box","size":[1.7,4.2,0.1],"pos":[-3.05,7.5,0],"color":"team","material":"Fabric","rot":[0,-90,0]},{"name":"BannerRod3","shape":"box","size":[2.0,0.18,0.18],"pos":[-3.11,9.65,0],"color":[232,188,74],"material":"Metal","rot":[0,-90,0]},{"name":"Corbel","shape":"cyl","size":[0.8,7.0],"pos":[0,12.8,0],"color":[92,92,102],"material":"Slate"},{"name":"Platform","shape":"cyl","size":[0.8,8.2],"pos":[0,13.6,0],"color":[128,128,138],"material":"Slate"},{"name":"Merlon0","shape":"box","size":[1.5,1.3,1.1],"pos":[1.359,14.65,3.28],"color":[158,158,166],"material":"Slate","rot":[0,22.5,0]},{"name":"Merlon1","shape":"box","size":[1.5,1.3,1.1],"pos":[3.28,14.65,1.359],"color":[158,158,166],"material":"Slate","rot":[0,67.5,0]},{"name":"Merlon2","shape":"box","size":[1.5,1.3,1.1],"pos":[3.28,14.65,-1.359],"color":[158,158,166],"material":"Slate","rot":[0,112.5,0]},{"name":"Merlon3","shape":"box","size":[1.5,1.3,1.1],"pos":[1.359,14.65,-3.28],"color":[158,158,166],"material":"Slate","rot":[0,157.5,0]},{"name":"Merlon4","shape":"box","size":[1.5,1.3,1.1],"pos":[-1.359,14.65,-3.28],"color":[158,158,166],"material":"Slate","rot":[0,202.5,0]},{"name":"Merlon5","shape":"box","size":[1.5,1.3,1.1],"pos":[-3.28,14.65,-1.359],"color":[158,158,166],"material":"Slate","rot":[0,247.5,0]},{"name":"Merlon6","shape":"box","size":[1.5,1.3,1.1],"pos":[-3.28,14.65,1.359],"color":[158,158,166],"material":"Slate","rot":[0,292.5,0]},{"name":"Merlon7","shape":"box","size":[1.5,1.3,1.1],"pos":[-1.359,14.65,3.28],"color":[158,158,166],"material":"Slate","rot":[0,337.5,0]},{"name":"Pedestal","shape":"cyl","size":[1.2,1.7],"pos":[0,14.6,0],"color":[232,188,74],"material":"Metal"},{"name":"Bowl","shape":"cyl","size":[0.4,2.6],"pos":[0,15.35,0],"color":[232,188,74],"material":"Metal"},{"name":"Crystal","shape":"box","size":[1.9,1.9,1.9],"pos":[0,17.4,0],"color":"team","material":"Neon","rot":[45,0,35]},{"name":"Halo","shape":"cyl","size":[0.12,4.2],"pos":[0,17.4,0],"color":"teamLight","material":"Neon","rot":[18,0,8],"alpha":0.45}],"fire":"Crystal"},"Nexus":{"root":"Base","barTop":15.5,"height":12.1,"parts":[{"name":"Base","shape":"box","size":[16,1.5,16],"pos":[0,0.75,0],"color":[170,170,182],"material":"Marble","collide":true},{"name":"Step","shape":"box","size":[12.5,1.2,12.5],"pos":[0,2.1,0],"color":[214,214,222],"material":"Marble","collide":true},{"name":"Dais","shape":"box","size":[9,1.0,9],"pos":[0,3.2,0],"color":[170,170,182],"material":"Marble","collide":true},{"name":"Inlay","shape":"box","size":[9.1,0.25,9.1],"pos":[0,3.6,0],"color":"team","material":"Neon"},{"name":"Pillar0","shape":"box","size":[1.2,6.0,1.2],"pos":[-6.4,4.5,-6.4],"color":[214,214,222],"material":"Marble","collide":true},{"name":"PillarCap0","shape":"box","size":[1.6,0.4,1.6],"pos":[-6.4,7.7,-6.4],"color":[232,188,74],"material":"Metal"},{"name":"PillarGem0","shape":"ball","size":[1.0],"pos":[-6.4,8.4,-6.4],"color":"team","material":"Neon"},{"name":"Pillar1","shape":"box","size":[1.2,6.0,1.2],"pos":[6.4,4.5,-6.4],"color":[214,214,222],"material":"Marble","collide":true},{"name":"PillarCap1","shape":"box","size":[1.6,0.4,1.6],"pos":[6.4,7.7,-6.4],"color":[232,188,74],"material":"Metal"},{"name":"PillarGem1","shape":"ball","size":[1.0],"pos":[6.4,8.4,-6.4],"color":"team","material":"Neon"},{"name":"Pillar2","shape":"box","size":[1.2,6.0,1.2],"pos":[-6.4,4.5,6.4],"color":[214,214,222],"material":"Marble","collide":true},{"name":"PillarCap2","shape":"box","size":[1.6,0.4,1.6],"pos":[-6.4,7.7,6.4],"color":[232,188,74],"material":"Metal"},{"name":"PillarGem2","shape":"ball","size":[1.0],"pos":[-6.4,8.4,6.4],"color":"team","material":"Neon"},{"name":"Pillar3","shape":"box","size":[1.2,6.0,1.2],"pos":[6.4,4.5,6.4],"color":[214,214,222],"material":"Marble","collide":true},{"name":"PillarCap3","shape":"box","size":[1.6,0.4,1.6],"pos":[6.4,7.7,6.4],"color":[232,188,74],"material":"Metal"},{"name":"PillarGem3","shape":"ball","size":[1.0],"pos":[6.4,8.4,6.4],"color":"team","material":"Neon"},{"name":"Pedestal","shape":"cyl","size":[1.6,3.2],"pos":[0,4.5,0],"color":[232,188,74],"material":"Metal"},{"name":"Core","shape":"box","size":[5,5,5],"pos":[0,9.0,0],"color":"team","material":"Neon","rot":[45,45,0]},{"name":"CoreShell","shape":"box","size":[6.2,6.2,6.2],"pos":[0,9.0,0],"color":"teamLight","material":"Glass","rot":[45,45,0],"alpha":0.75},{"name":"RingA","shape":"cyl","size":[0.2,11],"pos":[0,9.0,0],"color":"teamLight","material":"Neon","rot":[22,0,10],"alpha":0.55},{"name":"RingB","shape":"cyl","size":[0.2,9],"pos":[0,9.0,0],"color":"teamLight","material":"Neon","rot":[-18,0,-22],"alpha":0.55}]},"Tree":{"root":"Trunk","barTop":0,"height":10.7,"parts":[{"name":"Trunk","shape":"box","size":[1.4,5.2,1.4],"pos":[0,2.6,0],"color":[104,70,42],"material":"Wood","collide":true},{"name":"Root1","shape":"box","size":[0.6,0.6,2.4],"pos":[0,0.3,0],"color":[96,64,38],"material":"Wood"},{"name":"Root2","shape":"box","size":[2.4,0.6,0.6],"pos":[0,0.3,0],"color":[96,64,38],"material":"Wood"},{"name":"Branch","shape":"box","size":[0.5,2.0,0.5],"pos":[0.8,5.2,0],"color":[104,70,42],"material":"Wood","rot":[0,0,-35]},{"name":"LeavesMain","shape":"ball","size":[6.2],"pos":[0,6.4,0],"color":[46,112,50],"material":"Grass"},{"name":"LeavesSide","shape":"ball","size":[4.6],"pos":[1.9,6.0,1.0],"color":[52,124,54],"material":"Grass"},{"name":"LeavesBack","shape":"ball","size":[4.2],"pos":[-1.6,7.2,-0.9],"color":[40,100,46],"material":"Grass"},{"name":"LeavesTop","shape":"ball","size":[3.4],"pos":[0.2,9.0,0.3],"color":[58,132,58],"material":"Grass"}]}};
+  function resolve(c, team) {
+    if (Array.isArray(c)) return c;
+    const base = TEAM[team] || [200, 200, 200];
+    if (c === "teamDark") return lerp(base, BLACK, 0.4);
+    if (c === "teamLight") return lerp(base, WHITE, 0.35);
+    return base;
+  }
+  function specParts(name, team) {
+    return SPECS[name].parts.map(p => ({
+      name: p.name, shape: p.shape, size: p.size.slice(), pos: p.pos, rot: p.rot,
+      color: resolve(p.color, team), mat: p.material, alpha: p.alpha,
+    }));
+  }
+  const partCount = name => SPECS[name].parts.length;
+  function botHero(id, team) {
+    const h = HEROES[id], name = "Hero_" + id;
+    return {
+      parts: specParts(name, team), bar: { y: SPECS[name].barTop, w: 100, h: 9, name: `Bot ${id}  Lv1`, team },
+      title: id, kind: "Hero (bot)",
+      meta: [["Role", h.role], ["Attack", h.ranged ? `Ranged, ${h.range} studs` : `Melee, ${h.range} studs`], ["Base HP", h.hp], ["Parts", partCount(name)]],
+      text: `${h.desc} Abilities: ${h.abil}. Bots use this body. Player-controlled heroes keep their own Roblox avatar, with the same health bar and name tag on top.`,
+      src: `tools/gen_models.py · ${id.toLowerCase()}()  →  ModelSpecs.json "${name}"`,
+    };
+  }
+  function minion(type, team) {
+    const m = MINIONS[type], name = "Minion_" + type;
+    return {
+      parts: specParts(name, team), bar: { y: SPECS[name].barTop, w: 40, h: 5, team },
+      title: type[0].toUpperCase() + type.slice(1) + " minion", kind: "Minion",
+      meta: [["HP", m.hp], ["Range", m.range + " studs"], ["Parts", partCount(name)]],
+      text: m.desc,
+      src: `tools/gen_models.py · ${type}_minion()  →  ModelSpecs.json "${name}"`,
+    };
+  }
+  function tower(team) {
+    return {
+      parts: specParts("Tower", team), bar: { y: SPECS.Tower.barTop, w: 110, h: 9, team },
+      title: "Tower", kind: "Structure",
+      meta: [["HP", 3000], ["Damage", 150], ["Range", "24 studs"], ["Per team", "6 (2 per lane)"], ["Parts", partCount("Tower")]],
+      text: "A stone watchtower with team banners and battlements. Shots fire from the floating crystal. It targets the nearest minion first and switches to any enemy hero that attacks one of its allies. An inner tower can't be damaged until the outer tower in its lane falls; when a tower is destroyed it collapses to rubble.",
+      src: 'tools/gen_models.py · tower()  →  ModelSpecs.json "Tower"',
+    };
+  }
+  function nexus(team) {
+    return {
+      parts: specParts("Nexus", team), bar: { y: SPECS.Nexus.barTop, w: 160, h: 12, team },
+      title: "Nexus", kind: "Structure",
+      meta: [["HP", 5500], ["Armor", 30], ["Parts", partCount("Nexus")]],
+      text: "A glowing crystal core on a stepped marble dais, ringed by four pillars. Destroying the enemy nexus wins the match. It stays invulnerable until at least one of its team's inner towers is down.",
+      src: 'tools/gen_models.py · nexus()  →  ModelSpecs.json "Nexus"',
+    };
+  }
+  function fountain(team) {
+    const tc = TEAM[team];
+    return {
+      parts: [
+        { name: "Fountain pad", shape: "cyl", size: [0.3, 52], pos: [0, 0.2, 0], color: tc, mat: "Neon", alpha: 0.55 },
+        { name: "Pillar", shape: "cyl", size: [10, 4], pos: [0, 5, 0], color: tc, mat: "Neon" },
+      ],
+      title: "Fountain", kind: "Base",
+      meta: [["Radius", "26 studs"], ["Heals", "12% HP/mana per sec"]],
+      text: "Where heroes spawn and shop. It heals allies fast and burns enemy heroes that walk in, so the base can't be spawn-camped.",
+      src: "src/server/MapBuilder.lua · MapBuilder.build()",
+      plate: 34,
+    };
+  }
+  function tree() {
+    return {
+      parts: specParts("Tree"),
+      title: "Jungle tree", kind: "Scenery",
+      meta: [["Height", "about 9–13 studs"], ["Parts", partCount("Tree")]],
+      text: "Scattered through the jungle between lanes, each one randomly turned and scaled 80–125%. Trunks block players; leaves don't.",
+      src: 'tools/gen_models.py · tree()  →  ModelSpecs.json "Tree"',
+    };
+  }
+
+  // ------------------------------------------------- map geometry (mirrors src/shared/MapData.lua)
+  const B = [-230, 230], R = [230, -230];
+  const LANES = { Top: [B, [-230, -230], R], Mid: [B, R], Bot: [B, [230, 230], R] };
+  const FOUNTAIN = { Blue: [-264, 264], Red: [264, -264] };
+  const NEXUS = { Blue: B, Red: R };
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  function lanePath(lane, team) { const p = LANES[lane].slice(); return team === "Blue" ? p : p.reverse(); }
+  function pointAlong(path, frac) {
+    let total = 0; for (let i = 0; i < path.length - 1; i++) total += dist(path[i], path[i + 1]);
+    let rem = total * frac;
+    for (let i = 0; i < path.length - 1; i++) {
+      const len = dist(path[i], path[i + 1]);
+      if (rem <= len) { const t = rem / len; return [path[i][0] + (path[i + 1][0] - path[i][0]) * t, path[i][1] + (path[i + 1][1] - path[i][1]) * t]; }
+      rem -= len;
+    }
+    return path[path.length - 1];
+  }
+  function distToSeg(p, a, b) {
+    const abx = b[0] - a[0], abz = b[1] - a[1], l = abx * abx + abz * abz;
+    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * abx + (p[1] - a[1]) * abz) / l));
+    return Math.hypot(p[0] - (a[0] + abx * t), p[1] - (a[1] + abz * t));
+  }
+  function distToLanes(p) { let best = Infinity; for (const k in LANES) { const path = LANES[k]; for (let i = 0; i < path.length - 1; i++) best = Math.min(best, distToSeg(p, path[i], path[i + 1])); } return best; }
+  function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  function battlefield() {
+    const parts = [];
+    parts.push({ name: "Ground", shape: "box", size: [600, 4, 600], pos: [0, -2, 0], color: GRASS, mat: "grass" });
+    parts.push({ name: "River", shape: "box", size: [840, 0.1, 26], pos: [0, 0.05, 0], rot: [0, -45, 0], color: RIVER, mat: "glass", alpha: 0.15 });
+    for (const lane in LANES) {
+      const path = LANES[lane];
+      for (let i = 0; i < path.length - 1; i++) {
+        const a = path[i], b = path[i + 1];
+        const len = dist(a, b), ang = Math.atan2(b[0] - a[0], b[1] - a[1]) * 180 / Math.PI;
+        parts.push({ name: lane + " lane", shape: "box", size: [24, 0.14, len + 24], pos: [(a[0] + b[0]) / 2, 0.08, (a[1] + b[1]) / 2], rot: [0, ang, 0], color: LANE, mat: "sand" });
+      }
+    }
+    const extra = [];
+    for (const team of ["Blue", "Red"]) {
+      const n = NEXUS[team], f = FOUNTAIN[team], bc = [n[0] + (f[0] - n[0]) * 0.4, n[1] + (f[1] - n[1]) * 0.4];
+      parts.push({ name: team + " base", shape: "cyl", size: [0.2, 120], pos: [bc[0], 0.12, bc[1]], color: lerp(TEAM[team], LANE, 0.75), mat: "slate" });
+      for (const p of fountain(team).parts) extra.push({ model: { parts: [p] }, at: f });
+      extra.push({ model: nexus(team), at: n });
+      for (const lane of ["Top", "Mid", "Bot"]) for (const frac of [0.16, 0.34]) extra.push({ model: tower(team), at: pointAlong(lanePath(lane, team), frac) });
+    }
+    const rng = mulberry32(1337), trees = [];
+    for (let i = 0; i < 500; i++) {
+      const p = [(rng() * 2 - 1) * 288, (rng() * 2 - 1) * 288];
+      const riverDist = Math.abs(p[0] - p[1]) / Math.SQRT2;
+      if (distToLanes(p) > 20 && riverDist > 18 && dist(p, B) > 75 && dist(p, R) > 75) trees.push(p);
+    }
+    return {
+      parts, extra, trees, map: true,
+      title: "Battlefield", kind: "Map",
+      meta: [["Size", "600 × 600 studs"], ["Lanes", "Top · Mid · Bot"], ["Towers", "12"], ["Trees", trees.length + " (example layout)"]],
+      text: "Blue's base is bottom-left and Red's is top-right; each player's camera is turned so their own base sits at the bottom-left. The river crosses all three lanes. Tree positions here use the same rules as the game but a different random generator, so the exact layout differs in Roblox.",
+      src: "src/server/MapBuilder.lua · src/shared/MapData.lua",
+    };
+  }
+
+  function lineup(team) {
+    const order = [
+      ["melee", () => minion("melee", team)], ["caster", () => minion("caster", team)], ["siege", () => minion("siege", team)],
+      ...Object.keys(HEROES).map(id => [id, () => botHero(id, team)]),
+      ["tower", () => tower(team)], ["nexus", () => nexus(team)],
+    ];
+    const widths = { siege: 4, tower: 10, nexus: 17 };
+    let x = 0; const extra = [];
+    for (const [k, fn] of order) {
+      const w = widths[k] || 6; x += w / 2;
+      extra.push({ model: fn(), at: [x, 0], noRot: true }); x += w / 2 + 2;
+    }
+    extra.forEach(e => e.at[0] -= x / 2);
+    return {
+      parts: [], extra, plate: x / 2 + 6,
+      title: "Size lineup", kind: "All units",
+      meta: [["Left to right", "Minions · Heroes · Tower · Nexus"]],
+      text: "Everything at true relative scale. A standard Roblox avatar is about 5 studs tall, a little shorter than the bot heroes with their helmets and hats.",
+      src: "Built from all of the above",
+    };
+  }
+
+  const CATALOG = [
+    { group: "Heroes", items: Object.keys(HEROES).map(id => ({ key: "hero-" + id, label: id, tag: HEROES[id].ranged ? "ranged" : "melee", make: t => botHero(id, t) })) },
+    { group: "Minions", items: Object.keys(MINIONS).map(k => ({ key: "minion-" + k, label: k[0].toUpperCase() + k.slice(1), tag: MINIONS[k].hp + " hp", make: t => minion(k, t) })) },
+    { group: "Structures", items: [
+      { key: "tower", label: "Tower", tag: "3000 hp", make: tower },
+      { key: "nexus", label: "Nexus", tag: "5500 hp", make: nexus },
+      { key: "fountain", label: "Fountain", tag: "base", make: fountain },
+      { key: "tree", label: "Jungle tree", tag: "scenery", make: tree },
+    ] },
+    { group: "Overview", items: [
+      { key: "lineup", label: "Size lineup", tag: "all", make: lineup },
+      { key: "map", label: "Battlefield", tag: "map", make: battlefield },
+    ] },
+  ];
+
+  // ---------------------------------------------------------------- UI
+  const nav = document.getElementById("nav"), info = document.getElementById("info");
+  let current = "hero-Knight", team = "Blue", showBars = true, spin = true;
+  try { const saved = localStorage.getItem("moba-viewer"); if (saved) { const s = JSON.parse(saved); current = s.current || current; team = s.team || team; } } catch (e) {}
+  const save = () => { try { localStorage.setItem("moba-viewer", JSON.stringify({ current, team })); } catch (e) {} };
+
+  for (const g of CATALOG) {
+    const sec = document.createElement("div");
+    sec.innerHTML = `<h2>${g.group}</h2><ul></ul>`;
+    for (const it of g.items) {
+      const li = document.createElement("li");
+      li.innerHTML = `<button id="m-${it.key}" data-key="${it.key}"><span>${it.label}</span><small>${it.tag}</small></button>`;
+      sec.querySelector("ul").appendChild(li);
+    }
+    nav.appendChild(sec);
+  }
+  const findItem = key => { for (const g of CATALOG) for (const it of g.items) if (it.key === key) return it; return CATALOG[0].items[0]; };
+  nav.addEventListener("click", e => { const b = e.target.closest("button[data-key]"); if (b) { current = b.dataset.key; save(); show(); } });
+  document.querySelectorAll(".team-toggle button").forEach(b => b.addEventListener("click", () => { team = b.dataset.team; save(); show(); }));
+  document.getElementById("toggle-bars").addEventListener("click", e => { showBars = !showBars; e.currentTarget.setAttribute("aria-pressed", showBars); show(true); });
+  document.getElementById("toggle-spin").addEventListener("click", e => { spin = !spin; e.currentTarget.setAttribute("aria-pressed", spin); if (controls) controls.autoRotate = spin; });
+
+  const hex = c => "#" + c.map(v => v.toString(16).padStart(2, "0")).join("");
+  const fmt = n => (Math.round(n * 100) / 100).toString();
+  function renderInfo(m) {
+    const rows = (m.parts || []).filter(p => !m.map || ["Ground", "River"].includes(p.name)).map(p => {
+      const size = p.shape === "ball" ? `${fmt(p.size[0])} diameter` : p.shape === "cyl" ? `${fmt(p.size[0])} tall × ${fmt(p.size[1])} wide` : p.size.map(fmt).join(" × ");
+      return `<tr><td>${p.name}</td><td>${{ box: "Block", ball: "Ball", cyl: "Cylinder", wedge: "Wedge" }[p.shape]}</td><td class="mono">${size}</td><td class="mono">${p.pos.map(fmt).join(", ")}</td><td><span class="swatch" style="background:${hex(p.color)}"></span>${p.mat}${p.alpha ? ` · ${Math.round(p.alpha * 100)}% transparent` : ""}</td></tr>`;
+    }).join("");
+    info.innerHTML = `
+      <div class="meta"><span><b>${m.kind}</b></span>${m.meta.map(([k, v]) => `<span>${k}: <b>${v}</b></span>`).join("")}</div>
+      <h2>${m.title}</h2>
+      <p>${m.text}</p>
+      ${rows ? `<details${m.map ? " open" : ""}><summary>${m.map ? "Ground layers" : "All " + m.parts.length + " parts"}</summary><div class="table-wrap"><table><thead><tr><th>Part</th><th>Shape</th><th>Size (studs)</th><th>Position</th><th>Material</th></tr></thead><tbody>${rows}</tbody></table></div></details>` : ""}
+      <div class="src">${m.src}</div>`;
+  }
+
+  // ---------------------------------------------------------------- 3D
+  const stage = document.getElementById("stage");
+  let renderer, scene, camera, controls, root, sun;
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  function init() {
+    if (!window.THREE || !THREE.OrbitControls) { document.getElementById("loading").textContent = "The 3D library could not load. Check your connection and reload."; return false; }
+    document.getElementById("loading").remove();
+    renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    stage.prepend(renderer.domElement);
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(38, 1, 0.1, 5000);
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true; controls.autoRotate = spin; controls.autoRotateSpeed = 1.2;
+    controls.maxPolarAngle = Math.PI * 0.49;
+    scene.add(new THREE.HemisphereLight(0xdfeeff, 0x4a5a3a, 0.75));
+    sun = new THREE.DirectionalLight(0xffffff, 0.95);
+    sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.04;
+    scene.add(sun, sun.target);
+    applyTheme();
+    new ResizeObserver(resize).observe(stage); resize();
+    renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+    return true;
+  }
+  function applyTheme() { if (scene) scene.background = new THREE.Color(css("--stage")); }
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+  new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  function resize() { const w = stage.clientWidth, h = stage.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+
+  const matCache = {};
+  function material(p) {
+    const mat = (p.mat || "").toLowerCase();
+    const key = p.color.join() + mat + (p.alpha || 0);
+    if (matCache[key]) return matCache[key];
+    const color = new THREE.Color().setRGB(p.color[0] / 255, p.color[1] / 255, p.color[2] / 255).convertSRGBToLinear();
+    const opts = { color, roughness: 0.8, metalness: 0 };
+    if (mat === "neon") Object.assign(opts, { emissive: color, emissiveIntensity: 0.9, roughness: 0.4 });
+    if (mat === "metal") Object.assign(opts, { metalness: 0.65, roughness: 0.32 });
+    if (mat === "glass") Object.assign(opts, { roughness: 0.05, metalness: 0.1 });
+    if (mat === "marble") Object.assign(opts, { roughness: 0.35 });
+    if (mat === "fabric" || mat === "grass") Object.assign(opts, { roughness: 0.95 });
+    if (p.alpha) Object.assign(opts, { transparent: true, opacity: 1 - p.alpha, depthWrite: false });
+    return (matCache[key] = new THREE.MeshStandardMaterial(opts));
+  }
+  // Roblox WedgePart: full-height face at the back (+Z), sloping down to the front (-Z).
+  function wedgeGeometry(x, y, z) {
+    const A = [-x, -y, -z], B = [x, -y, -z], C = [-x, -y, z], D = [x, -y, z], E = [-x, y, z], F = [x, y, z];
+    const tris = [A, B, D, A, D, C, C, D, F, C, F, E, A, E, F, A, F, B, A, C, E, B, F, D];
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(tris.flat(), 3));
+    g.computeVertexNormals();
+    return g;
+  }
+  const geoCache = {};
+  function geometry(p) {
+    const key = p.shape + p.size.join();
+    if (geoCache[key]) return geoCache[key];
+    let g;
+    if (p.shape === "ball") g = new THREE.SphereGeometry(p.size[0] / 2, 32, 20);
+    else if (p.shape === "cyl") g = new THREE.CylinderGeometry(p.size[1] / 2, p.size[1] / 2, p.size[0], 40);
+    else if (p.shape === "wedge") g = wedgeGeometry(p.size[0] / 2, p.size[1] / 2, p.size[2] / 2);
+    else g = new THREE.BoxGeometry(p.size[0], p.size[1], p.size[2]);
+    return (geoCache[key] = g);
+  }
+  function makePart(p) {
+    const mesh = new THREE.Mesh(geometry(p), material(p));
+    mesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
+    if (p.rot) mesh.rotation.set(p.rot[0] * Math.PI / 180, p.rot[1] * Math.PI / 180, p.rot[2] * Math.PI / 180, "XYZ");
+    mesh.castShadow = !(p.alpha > 0.3) && p.name !== "Ground" && !/lane|base/.test(p.name); mesh.receiveShadow = true;
+    return mesh;
+  }
+  function barSprite(bar) {
+    const scale = 2, nameH = bar.name ? 16 : 0, w = bar.w * scale, h = (bar.h + nameH) * scale;
+    const c = document.createElement("canvas"); c.width = w + 80; c.height = h;
+    const g = c.getContext("2d");
+    if (bar.name) {
+      g.font = `bold ${12 * scale}px Inter, system-ui, sans-serif`; g.textAlign = "center"; g.textBaseline = "middle";
+      g.lineWidth = 4; g.strokeStyle = "rgba(0,0,0,0.6)"; g.strokeText(bar.name, c.width / 2, 7 * scale);
+      g.fillStyle = "#fff"; g.fillText(bar.name, c.width / 2, 7 * scale);
+    }
+    g.fillStyle = "#0f0f0f"; g.fillRect(40, nameH * scale, w, bar.h * scale);
+    g.fillStyle = hex(TEAM[bar.team]); g.fillRect(40, nameH * scale, w * 0.8, bar.h * scale);
+    const tex = new THREE.CanvasTexture(c); tex.encoding = THREE.sRGBEncoding;
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, sizeAttenuation: false, depthTest: false }));
+    const px = 0.0011; s.scale.set(c.width / scale * px, c.height / scale * px, 1); s.renderOrder = 10;
+    return s;
+  }
+  let noBars = false;
+  function buildModel(m, parent, at) {
+    const grp = new THREE.Group();
+    for (const p of m.parts) grp.add(makePart(p));
+    if (showBars && m.bar && !noBars) { const s = barSprite(m.bar); s.position.set(0, m.bar.y, 0); grp.add(s); }
+    if (at) grp.position.set(at[0], 0, at[1]);
+    parent.add(grp);
+    return grp;
+  }
+
+  function show(keepCamera) {
+    document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", b.dataset.key === current));
+    document.querySelectorAll(".team-toggle button").forEach(b => b.setAttribute("aria-pressed", b.dataset.team === team));
+    const m = findItem(current).make(team);
+    renderInfo(m);
+    if (!renderer) return;
+    if (root) scene.remove(root);
+    root = new THREE.Group(); scene.add(root);
+
+    noBars = !!(m.map || m.extra);
+    buildModel(m, root);
+    for (const e of m.extra || []) buildModel(e.model, root, e.at);
+    if (m.trees) {
+      const t = tree(), rng = mulberry32(7), D2R = Math.PI / 180;
+      const placements = m.trees.map(p => new THREE.Matrix4().compose(
+        new THREE.Vector3(p[0], 0, p[1]),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rng() * Math.PI * 2, 0)),
+        new THREE.Vector3().setScalar(0.8 + rng() * 0.45)));
+      for (const part of t.parts) {
+        const r = part.rot || [0, 0, 0];
+        const local = new THREE.Matrix4().compose(
+          new THREE.Vector3(part.pos[0], part.pos[1], part.pos[2]),
+          new THREE.Quaternion().setFromEuler(new THREE.Euler(r[0] * D2R, r[1] * D2R, r[2] * D2R, "XYZ")),
+          new THREE.Vector3(1, 1, 1));
+        const inst = new THREE.InstancedMesh(geometry(part), material(part), placements.length);
+        placements.forEach((pm, i) => inst.setMatrixAt(i, new THREE.Matrix4().multiplyMatrices(pm, local)));
+        inst.castShadow = true; inst.receiveShadow = true;
+        root.add(inst);
+      }
+    }
+
+    // Ground plate with a 4-stud grid for scale (single models)
+    let span;
+    if (!m.map) {
+      const box = new THREE.Box3().setFromObject(root); const size = box.getSize(new THREE.Vector3());
+      const r = m.plate || Math.max(8, Math.max(size.x, size.z) * 0.9 + 4);
+      const plate = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.4, 64), material({ color: GRASS, mat: "grass" }));
+      plate.position.y = -0.2; plate.receiveShadow = true; root.add(plate);
+      const grid = new THREE.GridHelper(Math.ceil(r * 2 / 4) * 4, Math.ceil(r * 2 / 4), 0x3d6a32, 0x5b8a4b);
+      grid.position.y = 0.02; grid.material.transparent = true; grid.material.opacity = 0.45; root.add(grid);
+      span = Math.max(size.y, size.x, size.z, 6);
+      const center = box.getCenter(new THREE.Vector3());
+      if (!keepCamera) {
+        controls.target.set(0, center.y * 0.85, 0);
+        // Models face -Z, so view them from the front-right.
+        const d = m.extra ? span * 0.85 : span * 1.6 + 3;
+        camera.position.set(d * 0.6, center.y + d * 0.4, -d * 0.95);
+      }
+      setSun(Math.max(r, span) + 10);
+    } else {
+      span = 600;
+      if (!keepCamera) { controls.target.set(0, 0, 0); camera.position.set(0, 560, team === "Red" ? -480 : 480); }
+      setSun(330);
+    }
+    controls.minDistance = 3; controls.maxDistance = m.map ? 1600 : span * 8 + 40;
+    controls.update();
+  }
+  function setSun(extent) {
+    sun.position.set(extent * 0.8, extent * 1.6, extent * 0.6); sun.target.position.set(0, 0, 0);
+    const c = sun.shadow.camera; c.left = c.bottom = -extent; c.right = c.top = extent; c.near = 1; c.far = extent * 5; c.updateProjectionMatrix();
+  }
+
+  init();
+  show();
+})();
+</script>

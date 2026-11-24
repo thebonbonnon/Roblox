@@ -1,0 +1,530 @@
+<title>MOBA Model Viewer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: header, then a model list beside a large 3D stage; parts table under the stage. Stacks on phones. */
+  :root {
+    --bg: #eef1f5;
+    --surface: #ffffff;
+    --fg: #1b2230;
+    --muted: #5d6779;
+    --line: #d6dbe4;
+    --accent: #2f6fe0;
+    --accent-soft: #e2ebfb;
+    --stage: #b9d3ea;
+    --blue: #3c8cff;
+    --red: #eb4646;
+    --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Inter", system-ui, -apple-system, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161e; --surface: #1a202b; --fg: #e6eaf2; --muted: #98a2b5; --line: #2a3242;
+      --accent: #6b9dff; --accent-soft: #233150; --stage: #1d2a3a; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161e; --surface: #1a202b; --fg: #e6eaf2; --muted: #98a2b5; --line: #2a3242;
+    --accent: #6b9dff; --accent-soft: #233150; --stage: #1d2a3a; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 14px; line-height: 1.5;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 20px 32px;
+  }
+  .wrap { max-width: 1240px; margin: 0 auto; display: grid; gap: 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+  h1 { font-family: var(--font-display); font-size: 1.6rem; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+  header p { margin: 2px 0 0; color: var(--muted); max-width: 62ch; }
+  .team-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+  .team-toggle button {
+    font: 600 13px var(--font-body); padding: 8px 14px; border: 0; background: transparent; color: var(--muted); cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .team-toggle button .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .team-toggle button[aria-pressed="true"] { background: var(--accent-soft); color: var(--fg); }
+  .main { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; align-items: start; }
+  nav { display: grid; gap: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  nav h2 { font: 600 11px var(--font-body); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 6px; }
+  nav ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  nav button {
+    width: 100%; text-align: left; font: 500 14px var(--font-body); color: var(--fg); background: transparent;
+    border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px;
+  }
+  nav button small { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+  nav button:hover { background: var(--bg); }
+  nav button[aria-current="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .stage-col { display: grid; gap: 16px; min-width: 0; }
+  .stage {
+    position: relative; width: 100%; aspect-ratio: 16 / 10; max-width: 100%; border-radius: 10px; overflow: hidden;
+    background: var(--stage); border: 1px solid var(--line);
+  }
+  .stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .hint {
+    position: absolute; left: 12px; bottom: 10px; font: 500 12px var(--font-body); color: #fff;
+    background: rgba(10, 16, 26, 0.55); padding: 4px 9px; border-radius: 6px; pointer-events: none;
+  }
+  .stage-tools { position: absolute; right: 10px; top: 10px; display: flex; gap: 6px; }
+  .stage-tools button {
+    font: 600 12px var(--font-body); padding: 6px 10px; border-radius: 6px; border: 0; cursor: pointer;
+    background: rgba(10, 16, 26, 0.6); color: #fff;
+  }
+  .stage-tools button[aria-pressed="true"] { background: var(--accent); }
+  .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-weight: 500; }
+  .info { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; }
+  .info h2 { font-family: var(--font-display); font-size: 1.25rem; margin: 0; }
+  .info .meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 13px; }
+  .info .meta b { color: var(--fg); font-weight: 600; }
+  .info p { margin: 0; max-width: 72ch; }
+  .src { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { text-align: left; font: 600 11px var(--font-body); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); }
+  td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td.mono { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; border: 1px solid rgba(0,0,0,0.15); }
+  details summary { cursor: pointer; font-weight: 600; color: var(--accent); padding: 4px 0; }
+  details[open] summary { margin-bottom: 6px; }
+  .note { color: var(--muted); font-size: 13px; }
+  @media (max-width: 760px) {
+    .main { grid-template-columns: 1fr; }
+    .stage { aspect-ratio: 4 / 3; }
+    nav { order: 2; }
+    nav ul { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>MOBA Model Viewer</h1>
+      <p>Every unit and structure from the game, rebuilt part by part from the Luau source. Sizes are in studs.</p>
+    </div>
+    <div class="team-toggle" role="group" aria-label="Team color">
+      <button id="team-blue" aria-pressed="true" data-team="Blue"><span class="dot" style="background: var(--blue)"></span>Blue team</button>
+      <button id="team-red" aria-pressed="false" data-team="Red"><span class="dot" style="background: var(--red)"></span>Red team</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <nav id="nav" aria-label="Models"></nav>
+    <div class="stage-col">
+      <div class="stage" id="stage">
+        <div class="loading" id="loading">Loading 3D viewer…</div>
+        <div class="stage-tools">
+          <button id="toggle-bars" aria-pressed="true" title="Shown on single models">Health bars</button>
+          <button id="toggle-spin" aria-pressed="true">Auto-rotate</button>
+        </div>
+        <div class="hint">Drag to orbit · scroll or pinch to zoom · right-drag to pan</div>
+      </div>
+      <section class="info" id="info" aria-live="polite"></section>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function () {
+  // ---------------------------------------------------------------- data (mirrors src/shared + src/server)
+  const TEAM = { Blue: [60, 140, 255], Red: [235, 70, 70] };
+  const HEROES = {
+    Knight:   { color: [205, 205, 215], ranged: false, role: "Fighter",  hp: 620, range: 6,   desc: "Durable melee bruiser who charges in and locks down groups.", abil: "Cleave · Rally · Charge · Judgment" },
+    Mage:     { color: [150, 90, 230],  ranged: true,  role: "Mage",     hp: 470, range: 28,  desc: "Fragile long-range caster with huge burst damage.", abil: "Fireball · Frost Nova · Blink · Meteor" },
+    Ranger:   { color: [90, 180, 90],   ranged: true,  role: "Marksman", hp: 510, range: 30,  desc: "Sustained ranged damage. Kites with tumbles and slows.", abil: "Piercing Arrow · Volley · Tumble · Rain of Arrows" },
+    Guardian: { color: [200, 160, 70],  ranged: false, role: "Tank",     hp: 720, range: 6,   desc: "Massive armored tank. Stuns, slows and soaks tower shots.", abil: "Shield Bash · Fortify · Ground Slam · Earthquake" },
+    Assassin: { color: [60, 60, 70],    ranged: false, role: "Assassin", hp: 530, range: 5.5, desc: "Fast melee killer that dives and executes low-health heroes.", abil: "Shadow Strike · Smoke Veil · Poison Blade · Execute" },
+  };
+  const MINIONS = {
+    melee:  { hp: 340, range: 3.5, desc: "Small armored soldier with a sword and round shield. Three spawn per lane every wave." },
+    caster: { hp: 230, range: 18, desc: "Hooded spellcaster with a glowing wand that fires team-colored bolts. Two per wave." },
+    siege:  { hp: 750, range: 22, desc: "Wheeled cannon cart that joins every third wave and outranges towers' minion screen." },
+  };
+  const GRASS = [78, 130, 62], LANE = [196, 170, 120], RIVER = [70, 140, 190];
+  const lerp = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  const BLACK = [0, 0, 0], WHITE = [255, 255, 255];
+
+  // Model specs come straight from src/shared/ModelSpecs.json (generated by tools/gen_models.py),
+  // the same file the game builds its models from.
+  const SPECS = /*SPECS*/null;
+  function resolve(c, team) {
+    if (Array.isArray(c)) return c;
+    const base = TEAM[team] || [200, 200, 200];
+    if (c === "teamDark") return lerp(base, BLACK, 0.4);
+    if (c === "teamLight") return lerp(base, WHITE, 0.35);
+    return base;
+  }
+  function specParts(name, team) {
+    return SPECS[name].parts.map(p => ({
+      name: p.name, shape: p.shape, size: p.size.slice(), pos: p.pos, rot: p.rot,
+      color: resolve(p.color, team), mat: p.material, alpha: p.alpha,
+    }));
+  }
+  const partCount = name => SPECS[name].parts.length;
+  function botHero(id, team) {
+    const h = HEROES[id], name = "Hero_" + id;
+    return {
+      parts: specParts(name, team), bar: { y: SPECS[name].barTop, w: 100, h: 9, name: `Bot ${id}  Lv1`, team },
+      title: id, kind: "Hero (bot)",
+      meta: [["Role", h.role], ["Attack", h.ranged ? `Ranged, ${h.range} studs` : `Melee, ${h.range} studs`], ["Base HP", h.hp], ["Parts", partCount(name)]],
+      text: `${h.desc} Abilities: ${h.abil}. Bots use this body. Player-controlled heroes keep their own Roblox avatar, with the same health bar and name tag on top.`,
+      src: `tools/gen_models.py · ${id.toLowerCase()}()  →  ModelSpecs.json "${name}"`,
+    };
+  }
+  function minion(type, team) {
+    const m = MINIONS[type], name = "Minion_" + type;
+    return {
+      parts: specParts(name, team), bar: { y: SPECS[name].barTop, w: 40, h: 5, team },
+      title: type[0].toUpperCase() + type.slice(1) + " minion", kind: "Minion",
+      meta: [["HP", m.hp], ["Range", m.range + " studs"], ["Parts", partCount(name)]],
+      text: m.desc,
+      src: `tools/gen_models.py · ${type}_minion()  →  ModelSpecs.json "${name}"`,
+    };
+  }
+  function tower(team) {
+    return {
+      parts: specParts("Tower", team), bar: { y: SPECS.Tower.barTop, w: 110, h: 9, team },
+      title: "Tower", kind: "Structure",
+      meta: [["HP", 3000], ["Damage", 150], ["Range", "24 studs"], ["Per team", "6 (2 per lane)"], ["Parts", partCount("Tower")]],
+      text: "A stone watchtower with team banners and battlements. Shots fire from the floating crystal. It targets the nearest minion first and switches to any enemy hero that attacks one of its allies. An inner tower can't be damaged until the outer tower in its lane falls; when a tower is destroyed it collapses to rubble.",
+      src: 'tools/gen_models.py · tower()  →  ModelSpecs.json "Tower"',
+    };
+  }
+  function nexus(team) {
+    return {
+      parts: specParts("Nexus", team), bar: { y: SPECS.Nexus.barTop, w: 160, h: 12, team },
+      title: "Nexus", kind: "Structure",
+      meta: [["HP", 5500], ["Armor", 30], ["Parts", partCount("Nexus")]],
+      text: "A glowing crystal core on a stepped marble dais, ringed by four pillars. Destroying the enemy nexus wins the match. It stays invulnerable until at least one of its team's inner towers is down.",
+      src: 'tools/gen_models.py · nexus()  →  ModelSpecs.json "Nexus"',
+    };
+  }
+  function fountain(team) {
+    const tc = TEAM[team];
+    return {
+      parts: [
+        { name: "Fountain pad", shape: "cyl", size: [0.3, 52], pos: [0, 0.2, 0], color: tc, mat: "Neon", alpha: 0.55 },
+        { name: "Pillar", shape: "cyl", size: [10, 4], pos: [0, 5, 0], color: tc, mat: "Neon" },
+      ],
+      title: "Fountain", kind: "Base",
+      meta: [["Radius", "26 studs"], ["Heals", "12% HP/mana per sec"]],
+      text: "Where heroes spawn and shop. It heals allies fast and burns enemy heroes that walk in, so the base can't be spawn-camped.",
+      src: "src/server/MapBuilder.lua · MapBuilder.build()",
+      plate: 34,
+    };
+  }
+  function tree() {
+    return {
+      parts: specParts("Tree"),
+      title: "Jungle tree", kind: "Scenery",
+      meta: [["Height", "about 9–13 studs"], ["Parts", partCount("Tree")]],
+      text: "Scattered through the jungle between lanes, each one randomly turned and scaled 80–125%. Trunks block players; leaves don't.",
+      src: 'tools/gen_models.py · tree()  →  ModelSpecs.json "Tree"',
+    };
+  }
+
+  // ------------------------------------------------- map geometry (mirrors src/shared/MapData.lua)
+  const B = [-230, 230], R = [230, -230];
+  const LANES = { Top: [B, [-230, -230], R], Mid: [B, R], Bot: [B, [230, 230], R] };
+  const FOUNTAIN = { Blue: [-264, 264], Red: [264, -264] };
+  const NEXUS = { Blue: B, Red: R };
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  function lanePath(lane, team) { const p = LANES[lane].slice(); return team === "Blue" ? p : p.reverse(); }
+  function pointAlong(path, frac) {
+    let total = 0; for (let i = 0; i < path.length - 1; i++) total += dist(path[i], path[i + 1]);
+    let rem = total * frac;
+    for (let i = 0; i < path.length - 1; i++) {
+      const len = dist(path[i], path[i + 1]);
+      if (rem <= len) { const t = rem / len; return [path[i][0] + (path[i + 1][0] - path[i][0]) * t, path[i][1] + (path[i + 1][1] - path[i][1]) * t]; }
+      rem -= len;
+    }
+    return path[path.length - 1];
+  }
+  function distToSeg(p, a, b) {
+    const abx = b[0] - a[0], abz = b[1] - a[1], l = abx * abx + abz * abz;
+    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * abx + (p[1] - a[1]) * abz) / l));
+    return Math.hypot(p[0] - (a[0] + abx * t), p[1] - (a[1] + abz * t));
+  }
+  function distToLanes(p) { let best = Infinity; for (const k in LANES) { const path = LANES[k]; for (let i = 0; i < path.length - 1; i++) best = Math.min(best, distToSeg(p, path[i], path[i + 1])); } return best; }
+  function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  function battlefield() {
+    const parts = [];
+    parts.push({ name: "Ground", shape: "box", size: [600, 4, 600], pos: [0, -2, 0], color: GRASS, mat: "grass" });
+    parts.push({ name: "River", shape: "box", size: [840, 0.1, 26], pos: [0, 0.05, 0], rot: [0, -45, 0], color: RIVER, mat: "glass", alpha: 0.15 });
+    for (const lane in LANES) {
+      const path = LANES[lane];
+      for (let i = 0; i < path.length - 1; i++) {
+        const a = path[i], b = path[i + 1];
+        const len = dist(a, b), ang = Math.atan2(b[0] - a[0], b[1] - a[1]) * 180 / Math.PI;
+        parts.push({ name: lane + " lane", shape: "box", size: [24, 0.14, len + 24], pos: [(a[0] + b[0]) / 2, 0.08, (a[1] + b[1]) / 2], rot: [0, ang, 0], color: LANE, mat: "sand" });
+      }
+    }
+    const extra = [];
+    for (const team of ["Blue", "Red"]) {
+      const n = NEXUS[team], f = FOUNTAIN[team], bc = [n[0] + (f[0] - n[0]) * 0.4, n[1] + (f[1] - n[1]) * 0.4];
+      parts.push({ name: team + " base", shape: "cyl", size: [0.2, 120], pos: [bc[0], 0.12, bc[1]], color: lerp(TEAM[team], LANE, 0.75), mat: "slate" });
+      for (const p of fountain(team).parts) extra.push({ model: { parts: [p] }, at: f });
+      extra.push({ model: nexus(team), at: n });
+      for (const lane of ["Top", "Mid", "Bot"]) for (const frac of [0.16, 0.34]) extra.push({ model: tower(team), at: pointAlong(lanePath(lane, team), frac) });
+    }
+    const rng = mulberry32(1337), trees = [];
+    for (let i = 0; i < 500; i++) {
+      const p = [(rng() * 2 - 1) * 288, (rng() * 2 - 1) * 288];
+      const riverDist = Math.abs(p[0] - p[1]) / Math.SQRT2;
+      if (distToLanes(p) > 20 && riverDist > 18 && dist(p, B) > 75 && dist(p, R) > 75) trees.push(p);
+    }
+    return {
+      parts, extra, trees, map: true,
+      title: "Battlefield", kind: "Map",
+      meta: [["Size", "600 × 600 studs"], ["Lanes", "Top · Mid · Bot"], ["Towers", "12"], ["Trees", trees.length + " (example layout)"]],
+      text: "Blue's base is bottom-left and Red's is top-right; each player's camera is turned so their own base sits at the bottom-left. The river crosses all three lanes. Tree positions here use the same rules as the game but a different random generator, so the exact layout differs in Roblox.",
+      src: "src/server/MapBuilder.lua · src/shared/MapData.lua",
+    };
+  }
+
+  function lineup(team) {
+    const order = [
+      ["melee", () => minion("melee", team)], ["caster", () => minion("caster", team)], ["siege", () => minion("siege", team)],
+      ...Object.keys(HEROES).map(id => [id, () => botHero(id, team)]),
+      ["tower", () => tower(team)], ["nexus", () => nexus(team)],
+    ];
+    const widths = { siege: 4, tower: 10, nexus: 17 };
+    let x = 0; const extra = [];
+    for (const [k, fn] of order) {
+      const w = widths[k] || 6; x += w / 2;
+      extra.push({ model: fn(), at: [x, 0], noRot: true }); x += w / 2 + 2;
+    }
+    extra.forEach(e => e.at[0] -= x / 2);
+    return {
+      parts: [], extra, plate: x / 2 + 6,
+      title: "Size lineup", kind: "All units",
+      meta: [["Left to right", "Minions · Heroes · Tower · Nexus"]],
+      text: "Everything at true relative scale. A standard Roblox avatar is about 5 studs tall, a little shorter than the bot heroes with their helmets and hats.",
+      src: "Built from all of the above",
+    };
+  }
+
+  const CATALOG = [
+    { group: "Heroes", items: Object.keys(HEROES).map(id => ({ key: "hero-" + id, label: id, tag: HEROES[id].ranged ? "ranged" : "melee", make: t => botHero(id, t) })) },
+    { group: "Minions", items: Object.keys(MINIONS).map(k => ({ key: "minion-" + k, label: k[0].toUpperCase() + k.slice(1), tag: MINIONS[k].hp + " hp", make: t => minion(k, t) })) },
+    { group: "Structures", items: [
+      { key: "tower", label: "Tower", tag: "3000 hp", make: tower },
+      { key: "nexus", label: "Nexus", tag: "5500 hp", make: nexus },
+      { key: "fountain", label: "Fountain", tag: "base", make: fountain },
+      { key: "tree", label: "Jungle tree", tag: "scenery", make: tree },
+    ] },
+    { group: "Overview", items: [
+      { key: "lineup", label: "Size lineup", tag: "all", make: lineup },
+      { key: "map", label: "Battlefield", tag: "map", make: battlefield },
+    ] },
+  ];
+
+  // ---------------------------------------------------------------- UI
+  const nav = document.getElementById("nav"), info = document.getElementById("info");
+  let current = "hero-Knight", team = "Blue", showBars = true, spin = true;
+  try { const saved = localStorage.getItem("moba-viewer"); if (saved) { const s = JSON.parse(saved); current = s.current || current; team = s.team || team; } } catch (e) {}
+  const save = () => { try { localStorage.setItem("moba-viewer", JSON.stringify({ current, team })); } catch (e) {} };
+
+  for (const g of CATALOG) {
+    const sec = document.createElement("div");
+    sec.innerHTML = `<h2>${g.group}</h2><ul></ul>`;
+    for (const it of g.items) {
+      const li = document.createElement("li");
+      li.innerHTML = `<button id="m-${it.key}" data-key="${it.key}"><span>${it.label}</span><small>${it.tag}</small></button>`;
+      sec.querySelector("ul").appendChild(li);
+    }
+    nav.appendChild(sec);
+  }
+  const findItem = key => { for (const g of CATALOG) for (const it of g.items) if (it.key === key) return it; return CATALOG[0].items[0]; };
+  nav.addEventListener("click", e => { const b = e.target.closest("button[data-key]"); if (b) { current = b.dataset.key; save(); show(); } });
+  document.querySelectorAll(".team-toggle button").forEach(b => b.addEventListener("click", () => { team = b.dataset.team; save(); show(); }));
+  document.getElementById("toggle-bars").addEventListener("click", e => { showBars = !showBars; e.currentTarget.setAttribute("aria-pressed", showBars); show(true); });
+  document.getElementById("toggle-spin").addEventListener("click", e => { spin = !spin; e.currentTarget.setAttribute("aria-pressed", spin); if (controls) controls.autoRotate = spin; });
+
+  const hex = c => "#" + c.map(v => v.toString(16).padStart(2, "0")).join("");
+  const fmt = n => (Math.round(n * 100) / 100).toString();
+  function renderInfo(m) {
+    const rows = (m.parts || []).filter(p => !m.map || ["Ground", "River"].includes(p.name)).map(p => {
+      const size = p.shape === "ball" ? `${fmt(p.size[0])} diameter` : p.shape === "cyl" ? `${fmt(p.size[0])} tall × ${fmt(p.size[1])} wide` : p.size.map(fmt).join(" × ");
+      return `<tr><td>${p.name}</td><td>${{ box: "Block", ball: "Ball", cyl: "Cylinder", wedge: "Wedge" }[p.shape]}</td><td class="mono">${size}</td><td class="mono">${p.pos.map(fmt).join(", ")}</td><td><span class="swatch" style="background:${hex(p.color)}"></span>${p.mat}${p.alpha ? ` · ${Math.round(p.alpha * 100)}% transparent` : ""}</td></tr>`;
+    }).join("");
+    info.innerHTML = `
+      <div class="meta"><span><b>${m.kind}</b></span>${m.meta.map(([k, v]) => `<span>${k}: <b>${v}</b></span>`).join("")}</div>
+      <h2>${m.title}</h2>
+      <p>${m.text}</p>
+      ${rows ? `<details${m.map ? " open" : ""}><summary>${m.map ? "Ground layers" : "All " + m.parts.length + " parts"}</summary><div class="table-wrap"><table><thead><tr><th>Part</th><th>Shape</th><th>Size (studs)</th><th>Position</th><th>Material</th></tr></thead><tbody>${rows}</tbody></table></div></details>` : ""}
+      <div class="src">${m.src}</div>`;
+  }
+
+  // ---------------------------------------------------------------- 3D
+  const stage = document.getElementById("stage");
+  let renderer, scene, camera, controls, root, sun;
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  function init() {
+    if (!window.THREE || !THREE.OrbitControls) { document.getElementById("loading").textContent = "The 3D library could not load. Check your connection and reload."; return false; }
+    document.getElementById("loading").remove();
+    renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    stage.prepend(renderer.domElement);
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(38, 1, 0.1, 5000);
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true; controls.autoRotate = spin; controls.autoRotateSpeed = 1.2;
+    controls.maxPolarAngle = Math.PI * 0.49;
+    scene.add(new THREE.HemisphereLight(0xdfeeff, 0x4a5a3a, 0.75));
+    sun = new THREE.DirectionalLight(0xffffff, 0.95);
+    sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.04;
+    scene.add(sun, sun.target);
+    applyTheme();
+    new ResizeObserver(resize).observe(stage); resize();
+    renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+    return true;
+  }
+  function applyTheme() { if (scene) scene.background = new THREE.Color(css("--stage")); }
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+  new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  function resize() { const w = stage.clientWidth, h = stage.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+
+  const matCache = {};
+  function material(p) {
+    const mat = (p.mat || "").toLowerCase();
+    const key = p.color.join() + mat + (p.alpha || 0);
+    if (matCache[key]) return matCache[key];
+    const color = new THREE.Color().setRGB(p.color[0] / 255, p.color[1] / 255, p.color[2] / 255).convertSRGBToLinear();
+    const opts = { color, roughness: 0.8, metalness: 0 };
+    if (mat === "neon") Object.assign(opts, { emissive: color, emissiveIntensity: 0.9, roughness: 0.4 });
+    if (mat === "metal") Object.assign(opts, { metalness: 0.65, roughness: 0.32 });
+    if (mat === "glass") Object.assign(opts, { roughness: 0.05, metalness: 0.1 });
+    if (mat === "marble") Object.assign(opts, { roughness: 0.35 });
+    if (mat === "fabric" || mat === "grass") Object.assign(opts, { roughness: 0.95 });
+    if (p.alpha) Object.assign(opts, { transparent: true, opacity: 1 - p.alpha, depthWrite: false });
+    return (matCache[key] = new THREE.MeshStandardMaterial(opts));
+  }
+  // Roblox WedgePart: full-height face at the back (+Z), sloping down to the front (-Z).
+  function wedgeGeometry(x, y, z) {
+    const A = [-x, -y, -z], B = [x, -y, -z], C = [-x, -y, z], D = [x, -y, z], E = [-x, y, z], F = [x, y, z];
+    const tris = [A, B, D, A, D, C, C, D, F, C, F, E, A, E, F, A, F, B, A, C, E, B, F, D];
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(tris.flat(), 3));
+    g.computeVertexNormals();
+    return g;
+  }
+  const geoCache = {};
+  function geometry(p) {
+    const key = p.shape + p.size.join();
+    if (geoCache[key]) return geoCache[key];
+    let g;
+    if (p.shape === "ball") g = new THREE.SphereGeometry(p.size[0] / 2, 32, 20);
+    else if (p.shape === "cyl") g = new THREE.CylinderGeometry(p.size[1] / 2, p.size[1] / 2, p.size[0], 40);
+    else if (p.shape === "wedge") g = wedgeGeometry(p.size[0] / 2, p.size[1] / 2, p.size[2] / 2);
+    else g = new THREE.BoxGeometry(p.size[0], p.size[1], p.size[2]);
+    return (geoCache[key] = g);
+  }
+  function makePart(p) {
+    const mesh = new THREE.Mesh(geometry(p), material(p));
+    mesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
+    if (p.rot) mesh.rotation.set(p.rot[0] * Math.PI / 180, p.rot[1] * Math.PI / 180, p.rot[2] * Math.PI / 180, "XYZ");
+    mesh.castShadow = !(p.alpha > 0.3) && p.name !== "Ground" && !/lane|base/.test(p.name); mesh.receiveShadow = true;
+    return mesh;
+  }
+  function barSprite(bar) {
+    const scale = 2, nameH = bar.name ? 16 : 0, w = bar.w * scale, h = (bar.h + nameH) * scale;
+    const c = document.createElement("canvas"); c.width = w + 80; c.height = h;
+    const g = c.getContext("2d");
+    if (bar.name) {
+      g.font = `bold ${12 * scale}px Inter, system-ui, sans-serif`; g.textAlign = "center"; g.textBaseline = "middle";
+      g.lineWidth = 4; g.strokeStyle = "rgba(0,0,0,0.6)"; g.strokeText(bar.name, c.width / 2, 7 * scale);
+      g.fillStyle = "#fff"; g.fillText(bar.name, c.width / 2, 7 * scale);
+    }
+    g.fillStyle = "#0f0f0f"; g.fillRect(40, nameH * scale, w, bar.h * scale);
+    g.fillStyle = hex(TEAM[bar.team]); g.fillRect(40, nameH * scale, w * 0.8, bar.h * scale);
+    const tex = new THREE.CanvasTexture(c); tex.encoding = THREE.sRGBEncoding;
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, sizeAttenuation: false, depthTest: false }));
+    const px = 0.0011; s.scale.set(c.width / scale * px, c.height / scale * px, 1); s.renderOrder = 10;
+    return s;
+  }
+  let noBars = false;
+  function buildModel(m, parent, at) {
+    const grp = new THREE.Group();
+    for (const p of m.parts) grp.add(makePart(p));
+    if (showBars && m.bar && !noBars) { const s = barSprite(m.bar); s.position.set(0, m.bar.y, 0); grp.add(s); }
+    if (at) grp.position.set(at[0], 0, at[1]);
+    parent.add(grp);
+    return grp;
+  }
+
+  function show(keepCamera) {
+    document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", b.dataset.key === current));
+    document.querySelectorAll(".team-toggle button").forEach(b => b.setAttribute("aria-pressed", b.dataset.team === team));
+    const m = findItem(current).make(team);
+    renderInfo(m);
+    if (!renderer) return;
+    if (root) scene.remove(root);
+    root = new THREE.Group(); scene.add(root);
+
+    noBars = !!(m.map || m.extra);
+    buildModel(m, root);
+    for (const e of m.extra || []) buildModel(e.model, root, e.at);
+    if (m.trees) {
+      const t = tree(), rng = mulberry32(7), D2R = Math.PI / 180;
+      const placements = m.trees.map(p => new THREE.Matrix4().compose(
+        new THREE.Vector3(p[0], 0, p[1]),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rng() * Math.PI * 2, 0)),
+        new THREE.Vector3().setScalar(0.8 + rng() * 0.45)));
+      for (const part of t.parts) {
+        const r = part.rot || [0, 0, 0];
+        const local = new THREE.Matrix4().compose(
+          new THREE.Vector3(part.pos[0], part.pos[1], part.pos[2]),
+          new THREE.Quaternion().setFromEuler(new THREE.Euler(r[0] * D2R, r[1] * D2R, r[2] * D2R, "XYZ")),
+          new THREE.Vector3(1, 1, 1));
+        const inst = new THREE.InstancedMesh(geometry(part), material(part), placements.length);
+        placements.forEach((pm, i) => inst.setMatrixAt(i, new THREE.Matrix4().multiplyMatrices(pm, local)));
+        inst.castShadow = true; inst.receiveShadow = true;
+        root.add(inst);
+      }
+    }
+
+    // Ground plate with a 4-stud grid for scale (single models)
+    let span;
+    if (!m.map) {
+      const box = new THREE.Box3().setFromObject(root); const size = box.getSize(new THREE.Vector3());
+      const r = m.plate || Math.max(8, Math.max(size.x, size.z) * 0.9 + 4);
+      const plate = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.4, 64), material({ color: GRASS, mat: "grass" }));
+      plate.position.y = -0.2; plate.receiveShadow = true; root.add(plate);
+      const grid = new THREE.GridHelper(Math.ceil(r * 2 / 4) * 4, Math.ceil(r * 2 / 4), 0x3d6a32, 0x5b8a4b);
+      grid.position.y = 0.02; grid.material.transparent = true; grid.material.opacity = 0.45; root.add(grid);
+      span = Math.max(size.y, size.x, size.z, 6);
+      const center = box.getCenter(new THREE.Vector3());
+      if (!keepCamera) {
+        controls.target.set(0, center.y * 0.85, 0);
+        // Models face -Z, so view them from the front-right.
+        const d = m.extra ? span * 0.85 : span * 1.6 + 3;
+        camera.position.set(d * 0.6, center.y + d * 0.4, -d * 0.95);
+      }
+      setSun(Math.max(r, span) + 10);
+    } else {
+      span = 600;
+      if (!keepCamera) { controls.target.set(0, 0, 0); camera.position.set(0, 560, team === "Red" ? -480 : 480); }
+      setSun(330);
+    }
+    controls.minDistance = 3; controls.maxDistance = m.map ? 1600 : span * 8 + 40;
+    controls.update();
+  }
+  function setSun(extent) {
+    sun.position.set(extent * 0.8, extent * 1.6, extent * 0.6); sun.target.position.set(0, 0, 0);
+    const c = sun.shadow.camera; c.left = c.bottom = -extent; c.right = c.top = extent; c.near = 1; c.far = extent * 5; c.updateProjectionMatrix();
+  }
+
+  init();
+  show();
+})();
+</script>

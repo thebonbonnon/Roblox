@@ -7,67 +7,28 @@ local Units = require(script.Parent.Units)
 local HeroService = require(script.Parent.HeroService)
 local Abilities = require(script.Parent.Abilities)
 local Structures = require(script.Parent.Structures)
+local ModelFactory = require(script.Parent.ModelFactory)
 
 local flat = Units.flat
 local Bots = {}
 Bots.list = {}
 
 local THINK_INTERVAL = 0.15
-local ROOT_Y = Config.GroundY + 3.3
 local accum = 0
 
 ---------------------------------------------------------------------------
--- Body
+-- Body (see tools/gen_models.py for the part layout)
 ---------------------------------------------------------------------------
-local function weldedPart(model, root, props, offset)
-	local p = Instance.new("Part")
-	p.Anchored = false
-	p.CanCollide = false
-	p.CanTouch = false
-	p.Massless = true
-	p.TopSurface = Enum.SurfaceType.Smooth
-	p.BottomSurface = Enum.SurfaceType.Smooth
-	for k, v in pairs(props) do
-		p[k] = v
-	end
-	p.CFrame = root.CFrame * offset
-	local weld = Instance.new("WeldConstraint")
-	weld.Part0 = root
-	weld.Part1 = p
-	weld.Parent = p
-	p.Parent = model
-	return p
-end
-
 local function buildModel(u, pos)
-	local def = u.def
-	local teamColor = Config.TeamColors[u.team]
-	local model = Instance.new("Model")
-	model.Name = u.name
-
-	local torso = Instance.new("Part")
-	torso.Name = "Torso"
-	torso.Anchored = true
-	torso.CanCollide = false
-	torso.CanTouch = false
-	torso.Size = Vector3.new(2.4, 2.6, 1.4)
-	torso.Color = def.color
-	torso.Material = Enum.Material.SmoothPlastic
-	torso.CFrame = CFrame.new(pos.X, ROOT_Y, pos.Z)
-	torso.Parent = model
-
-	weldedPart(model, torso, { Name = "Legs", Size = Vector3.new(2.2, 2, 1.2), Color = teamColor:Lerp(Color3.new(0, 0, 0), 0.4) }, CFrame.new(0, -2.3, 0))
-	weldedPart(model, torso, { Name = "Head", Shape = Enum.PartType.Ball, Size = Vector3.one * 1.7, Color = Color3.fromRGB(240, 205, 170) }, CFrame.new(0, 2.15, 0))
-	weldedPart(model, torso, { Name = "Band", Size = Vector3.new(1.8, 0.35, 1.8), Color = teamColor, Material = Enum.Material.Neon }, CFrame.new(0, 2.35, 0))
-	if def.ranged then
-		weldedPart(model, torso, { Name = "Staff", Size = Vector3.new(0.3, 4.5, 0.3), Color = def.color:Lerp(Color3.new(1, 1, 1), 0.3), Material = Enum.Material.Neon }, CFrame.new(1.6, 0.2, -0.3))
-	else
-		weldedPart(model, torso, { Name = "Blade", Size = Vector3.new(0.3, 0.4, 4), Color = Color3.fromRGB(210, 210, 220), Material = Enum.Material.Metal }, CFrame.new(1.6, -0.4, -1.6))
-	end
-
-	model.PrimaryPart = torso
+	local model, root, info = ModelFactory.build("Hero_" .. u.heroId, {
+		team = u.team,
+		name = u.name,
+		cframe = CFrame.new(pos.X, Config.GroundY, pos.Z) * CFrame.Angles(0, u.team == "Red" and math.rad(180) or 0, 0),
+	})
+	u.rootY = Config.GroundY + info.rootY
+	u.barHeight = info.barHeight
 	model.Parent = workspace:WaitForChild("Units")
-	return model, torso
+	return model, root
 end
 
 ---------------------------------------------------------------------------
@@ -277,7 +238,6 @@ function Bots.create(team, heroId, lane)
 	u.path = MapData.GetLanePath(lane, team)
 	u.wp = 2
 	u.kinematic = true
-	u.rootY = ROOT_Y
 	u.moveDir = Vector3.zero
 	u.customSpawn = function(self, pos)
 		local model, root = buildModel(self, pos)

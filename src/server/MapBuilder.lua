@@ -4,6 +4,7 @@ local Lighting = game:GetService("Lighting")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local MapData = require(ReplicatedStorage.Shared.MapData)
+local ModelFactory = require(script.Parent.ModelFactory)
 
 local MapBuilder = {}
 
@@ -39,24 +40,12 @@ local function disc(parent, name, center, radius, y, thickness, color, material,
 end
 
 local function tree(parent, pos, rng)
-	local h = rng:NextNumber(5, 8)
-	make("Part", {
-		Name = "Trunk",
-		Size = Vector3.new(1.6, h, 1.6),
-		CFrame = CFrame.new(pos.X, Config.GroundY + h / 2, pos.Z),
-		Color = Color3.fromRGB(105, 70, 40),
-		Material = Enum.Material.Wood,
-	}, parent)
-	local s = rng:NextNumber(7, 11)
-	make("Part", {
-		Name = "Leaves",
-		Shape = Enum.PartType.Ball,
-		Size = Vector3.one * s,
-		CFrame = CFrame.new(pos.X, Config.GroundY + h + s * 0.3, pos.Z),
-		Color = Color3.fromRGB(40, rng:NextInteger(90, 120), 45),
-		Material = Enum.Material.Grass,
-		CanCollide = false,
-	}, parent)
+	local model = ModelFactory.build("Tree", {
+		cframe = CFrame.new(pos.X, Config.GroundY, pos.Z) * CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0),
+		scale = rng:NextNumber(0.8, 1.25),
+		static = true,
+	})
+	model.Parent = parent
 end
 
 function MapBuilder.build()

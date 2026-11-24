@@ -53,17 +53,17 @@ Config.MinionLeash = 26
 Config.Minions = {
 	melee = {
 		hp = 340, damage = 22, armor = 10, range = 3.5, attackCd = 1.2, speed = 13,
-		size = Vector3.new(2.4, 3, 2.4), shape = "Block", ranged = false, radius = 1.4,
+		ranged = false, radius = 1.4,
 		gold = 20, xp = 30,
 	},
 	caster = {
 		hp = 230, damage = 30, armor = 0, range = 18, attackCd = 1.5, speed = 13,
-		size = Vector3.new(2.2, 2.2, 2.2), shape = "Ball", ranged = true, radius = 1.2,
+		ranged = true, radius = 1.2,
 		gold = 16, xp = 26,
 	},
 	siege = {
 		hp = 750, damage = 50, armor = 20, range = 22, attackCd = 2.0, speed = 11,
-		size = Vector3.new(3.4, 3, 4.4), shape = "Block", ranged = true, radius = 2.2,
+		ranged = true, radius = 2.2,
 		gold = 45, xp = 60,
 	},
 }
