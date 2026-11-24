@@ -3,7 +3,8 @@
 
 	Drop-in replacements: put a Model with the same name (e.g. "Tower", "Hero_Knight",
 	"Minion_melee", "Tree") in ServerStorage.Models or ReplicatedStorage.Models and it is used
-	instead. It is scaled to the built-in model's height, any scripts inside are removed, and
+	instead. Per-team versions ("Tower_Blue", "Tower_Red") take priority, for meshes whose
+	team colors are baked into the texture. It is scaled to the built-in model's height, any scripts inside are removed, and
 	parts whose names start with "Team" are recolored to the team color.
 
 	Usage:
@@ -101,12 +102,17 @@ local function weld(root, part)
 	w.Parent = part
 end
 
-local function findCustom(name)
-	for _, container in ipairs({ ServerStorage, ReplicatedStorage }) do
-		local folder = container:FindFirstChild("Models")
-		local m = folder and folder:FindFirstChild(name)
-		if m and m:IsA("Model") then
-			return m
+-- Looks for "<name>_<team>" first (e.g. "Tower_Red", for meshes with team colors baked into
+-- their texture), then "<name>".
+local function findCustom(name, team)
+	local candidates = team and { name .. "_" .. team, name } or { name }
+	for _, candidate in ipairs(candidates) do
+		for _, container in ipairs({ ServerStorage, ReplicatedStorage }) do
+			local folder = container:FindFirstChild("Models")
+			local m = folder and folder:FindFirstChild(candidate)
+			if m and m:IsA("Model") then
+				return m
+			end
 		end
 	end
 	return nil
@@ -319,7 +325,7 @@ function ModelFactory.build(name, opts)
 	opts.cframe = opts.cframe or CFrame.new()
 	local scale = opts.scale or 1
 
-	local custom = findCustom(name)
+	local custom = findCustom(name, opts.team)
 	local model, root, fire, parts
 	if custom then
 		model, root, fire, parts = buildFromCustom(custom, spec, opts, scale)

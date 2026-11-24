@@ -59,6 +59,8 @@ Every unit is built from Roblox parts, with no assets needed: armored heroes wit
 
 - The models are defined in `tools/gen_models.py`. Run `python3 tools/gen_models.py` after editing it. It writes `src/shared/ModelSpecs.json` (which the game builds from) and `tools/model-viewer.html`, a 3D preview you can open in a browser.
 - **Swap in your own models (Creator Store, Blender, etc.):** create a folder named `Models` in `ServerStorage` and put a Model inside with one of these names: `Hero_Knight`, `Hero_Mage`, `Hero_Ranger`, `Hero_Guardian`, `Hero_Assassin`, `Minion_melee`, `Minion_caster`, `Minion_siege`, `Tower`, `Nexus`, `Tree`. The game then uses it instead of the built-in one. It is scaled to the same height, scripts inside it are deleted, and any part whose name starts with `Team` is recolored to the team color. Models should face -Z (the front in Studio). Drop-in hero models are used as rigid statues (no animation); to animate one, give it the same R6 part and joint names.
+- **Per-team versions:** a model named `Tower_Blue` or `Tower_Red` is used for that team ahead of plain `Tower`. Use this for meshes with team colors painted into their texture.
+- **Making better models with AI:** `art/meshy/` has clean reference renders of every model (5 views, both team colors) and a matching text prompt for each, ready for Meshy or other image-to-3D tools. See `art/meshy/README.md`.
 - Free models can contain malicious scripts. The loader strips them, but still prefer verified creators.
 
 ## Project layout
