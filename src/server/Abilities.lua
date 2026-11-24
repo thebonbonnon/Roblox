@@ -219,6 +219,9 @@ function Abilities.tryCast(u, slot, targetPos)
 	end
 	u.mana -= ab.mana
 	u.cooldowns[slot] = t + ab.cooldown
+	if u.anim then
+		u.anim.attack(ab.type == "skillshot" and "lunge" or "slash")
+	end
 	Units.refresh(u)
 	return true, ab.cooldown
 end

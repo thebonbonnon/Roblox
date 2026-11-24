@@ -374,6 +374,9 @@ end
 function Units.basicAttack(a, t)
 	a.lastAttack = now()
 	Units.face(a, t.root.Position)
+	if a.anim then
+		a.anim.attack(a.ranged and "lunge" or "slash")
+	end
 	local dmg = Units.getDamage(a)
 	if a.ranged then
 		local origin = (a.firePart or a.root).Position

@@ -9,14 +9,20 @@ Models face -Z (Roblox's LookVector), so +X is the model's right side.
 
 Part fields
   name      unique within the model
-  shape     box | ball | cyl | wedge
+  shape     box | ball | cyl | wedge | head
   size      box/wedge: [x, y, z]   ball: [diameter]   cyl: [height, diameter] (vertical axis)
+            head: [2, 1, 1], the classic R6 head (a Part with a Head SpecialMesh)
   pos       [x, y, z] center
   rot       optional [x, y, z] degrees, applied as CFrame.Angles (XYZ)
   color     [r, g, b] or one of "team", "teamDark", "teamLight"
   material  Roblox Enum.Material name
   alpha     optional transparency 0..1
   collide   optional, true if players should bump into it
+  attach    R6 heroes only: the limb a gear part is welded to (Torso, Head, Left Arm, ...)
+
+Heroes are R6 rigs (model "rig": "R6"): HumanoidRootPart + the six standard R6 body parts at
+standard sizes, joined by Motor6Ds, so Roblox's R6 animations play on them and their gear can be
+welded onto players' R6 avatars.
 """
 import json
 import math
@@ -37,13 +43,15 @@ WHITE = [236, 236, 236]
 
 
 class M:
-    def __init__(self, root, bar_top, fire=None):
+    def __init__(self, root, bar_top, fire=None, rig=None):
         self.parts = []
         self.root = root
         self.bar_top = bar_top
         self.fire = fire
+        self.rig = rig
+        self.on = None  # R6 limb that following gear parts are welded to
 
-    def add(self, name, shape, size, pos, color, material="SmoothPlastic", rot=None, alpha=None, collide=None):
+    def add(self, name, shape, size, pos, color, material="SmoothPlastic", rot=None, alpha=None, collide=None, attach=None):
         p = {"name": name, "shape": shape, "size": [round(v, 3) for v in size],
              "pos": [round(v, 3) for v in pos], "color": color, "material": material}
         if rot:
@@ -52,6 +60,10 @@ class M:
             p["alpha"] = alpha
         if collide:
             p["collide"] = True
+        attach = attach or self.on
+        if self.rig and name not in R6_BODY:
+            assert attach in R6_LIMBS, "gear part %s needs a limb" % name
+            p["attach"] = attach
         assert not any(q["name"] == name for q in self.parts), name
         self.parts.append(p)
         return self
@@ -72,54 +84,83 @@ class M:
         top = 0
         for p in self.parts:
             s = p["size"]
-            half = s[0] / 2 if p["shape"] in ("ball", "cyl") else s[1] / 2
+            if p["shape"] == "head":
+                half = 0.625
+            elif p["shape"] in ("ball", "cyl"):
+                half = s[0] / 2
+            else:
+                half = s[1] / 2
             top = max(top, p["pos"][1] + half)
         assert any(p["name"] == self.root for p in self.parts), self.root
         out = {"root": self.root, "barTop": self.bar_top, "height": round(top, 2), "parts": self.parts}
         if self.fire:
             out["fire"] = self.fire
+        if self.rig:
+            out["rig"] = self.rig
         return out
 
 
-def face(m, y, z=-0.66, eye=BLACK):
+# --------------------------------------------------------------------------- R6 rig
+# Standard R6 body: every hero uses these exact sizes so Roblox's R6 animations line up and the
+# gear fits any player's R6 avatar. Bulk (bigger armor, robes) is added as gear on top.
+R6_LIMBS = ("Torso", "Head", "Left Arm", "Right Arm", "Left Leg", "Right Leg")
+R6_BODY = ("HumanoidRootPart",) + R6_LIMBS
+
+
+def r6(bar_top, torso, arms, legs, torso_mat="SmoothPlastic", arm_mat=None, leg_mat=None, skin=SKIN):
+    m = M("HumanoidRootPart", bar_top=bar_top, rig="R6")
+    m.box("HumanoidRootPart", [2, 2, 1], [0, 3, 0], [163, 162, 165], alpha=1)
+    m.box("Torso", [2, 2, 1], [0, 3, 0], torso, torso_mat)
+    m.add("Head", "head", [2, 1, 1], [0, 4.5, 0], skin)
+    m.box("Left Arm", [1, 2, 1], [-1.5, 3, 0], arms, arm_mat or torso_mat)
+    m.box("Right Arm", [1, 2, 1], [1.5, 3, 0], arms, arm_mat or torso_mat)
+    m.box("Left Leg", [1, 2, 1], [-0.5, 1, 0], legs, leg_mat or torso_mat)
+    m.box("Right Leg", [1, 2, 1], [0.5, 1, 0], legs, leg_mat or torso_mat)
+    return m
+
+
+def face(m, y=4.6, z=-0.64, eye=BLACK):
+    m.on = "Head"
     m.box("EyeL", [0.18, 0.22, 0.05], [-0.28, y, z], eye)
     m.box("EyeR", [0.18, 0.22, 0.05], [0.28, y, z], eye)
 
 
+ARM = {"L": "Left Arm", "R": "Right Arm"}
+LEG = {"L": "Left Leg", "R": "Right Leg"}
+
+
 # --------------------------------------------------------------------------- heroes
 def knight():
-    m = M("Torso", bar_top=7.4)
+    m = r6(7.3, STEEL, STEEL, STEEL, "Metal")
     for side, x in (("L", -0.5), ("R", 0.5)):
-        m.box("Leg" + side, [1, 2, 1], [x, 1, 0], STEEL, "Metal")
+        m.on = LEG[side]
         m.box("Boot" + side, [1.06, 0.55, 1.16], [x, 0.28, -0.04], STEEL_DARK, "Metal")
         m.box("Knee" + side, [0.6, 0.4, 0.12], [x, 1.25, -0.53], STEEL_DARK, "Metal")
-    m.box("Torso", [2, 2, 1], [0, 3, 0], STEEL, "Metal")
+    m.on = "Torso"
     m.box("Tabard", [1.5, 1.95, 0.08], [0, 2.95, -0.54], "team", "Fabric")
     m.box("TabardCross", [0.3, 1.2, 0.04], [0, 3.15, -0.6], WHITE, "Fabric")
     m.box("TabardCrossBar", [0.9, 0.3, 0.04], [0, 3.35, -0.6], WHITE, "Fabric")
     m.box("Belt", [2.06, 0.3, 1.06], [0, 2.15, 0], LEATHER, "Fabric")
     m.box("Buckle", [0.35, 0.3, 0.08], [0, 2.15, -0.57], GOLD, "Metal")
     for side, x in (("L", -1.5), ("R", 1.5)):
-        m.box("Arm" + side, [1, 2, 1], [x, 3, 0], STEEL, "Metal")
+        m.on = ARM[side]
         m.box("Pauldron" + side, [1.4, 0.55, 1.4], [x * 1.04, 4.05, 0], STEEL, "Metal")
         m.box("PauldronTrim" + side, [1.46, 0.16, 1.46], [x * 1.04, 3.75, 0], "team", "Metal")
         m.box("Gauntlet" + side, [1.08, 0.6, 1.08], [x, 2.25, 0], STEEL_DARK, "Metal")
-    m.cyl("Head", 1.2, 1.3, [0, 4.6, 0], SKIN)
-    m.cyl("Helmet", 1.4, 1.48, [0, 4.68, 0], STEEL, "Metal")
-    m.ball("HelmetDome", 1.48, [0, 5.3, 0], STEEL, "Metal")
-    m.box("Visor", [1.0, 0.14, 0.08], [0, 4.72, -0.74], BLACK)
-    m.box("VisorRidge", [0.14, 0.9, 0.1], [0, 4.55, -0.74], STEEL_DARK, "Metal")
-    m.box("Plume", [0.22, 0.75, 1.3], [0, 6.1, 0.1], "team", "Fabric")
-    # sword, held forward in the right hand
+    m.on = "Head"
+    m.cyl("Helmet", 1.4, 1.48, [0, 4.58, 0], STEEL, "Metal")
+    m.ball("HelmetDome", 1.48, [0, 5.2, 0], STEEL, "Metal")
+    m.box("Visor", [1.0, 0.14, 0.08], [0, 4.62, -0.74], BLACK)
+    m.box("VisorRidge", [0.14, 0.9, 0.1], [0, 4.45, -0.74], STEEL_DARK, "Metal")
+    m.box("Plume", [0.22, 0.75, 1.3], [0, 6.0, 0.1], "team", "Fabric")
+    m.on = "Right Arm"  # sword held forward
     m.box("SwordGrip", [0.24, 0.24, 0.8], [1.5, 2.0, -0.45], LEATHER_DARK)
     m.ball("SwordPommel", 0.36, [1.5, 2.0, -0.02], GOLD, "Metal")
     m.box("SwordGuard", [0.95, 0.2, 0.22], [1.5, 2.0, -0.92], GOLD, "Metal")
     m.box("SwordBlade", [0.32, 0.1, 3.2], [1.5, 2.0, -2.6], BLADE, "Metal")
-    # wedge rotated so it tapers across the blade's width, toward the tip (-Z)
     m.wedge("SwordTip", [0.1, 0.32, 0.45], [1.5, 2.0, -4.42], BLADE, "Metal", rot=[0, 0, 90])
-    # kite shield on the left arm
+    m.on = "Left Arm"  # kite shield
     m.box("Shield", [0.25, 2.2, 1.7], [-2.15, 3.1, -0.1], "team", "Metal")
-    # two mirrored wedges form the kite point under the shield
     m.wedge("ShieldPointA", [0.25, 0.8, 0.85], [-2.15, 1.6, -0.525], "team", "Metal", rot=[0, 0, 180])
     m.wedge("ShieldPointB", [0.25, 0.8, 0.85], [-2.15, 1.6, 0.325], "team", "Metal", rot=[180, 0, 0])
     m.box("ShieldRim", [0.28, 0.16, 1.78], [-2.15, 4.18, -0.1], GOLD, "Metal")
@@ -131,64 +172,62 @@ def knight():
 def mage():
     robe, robe_dark, robe_light = [104, 58, 176], [70, 36, 128], [168, 120, 232]
     orb = [196, 130, 255]
-    m = M("Torso", bar_top=8.0)
-    m.box("Skirt", [2.15, 2.1, 1.35], [0, 1.05, 0], robe, "Fabric")
-    m.box("SkirtFlare", [2.45, 0.7, 1.6], [0, 0.35, 0], robe, "Fabric")
-    m.box("Hem", [2.5, 0.2, 1.65], [0, 0.1, 0], "team", "Fabric")
-    m.box("Torso", [2, 2, 1], [0, 3, 0], robe, "Fabric")
+    m = r6(7.9, robe, robe, robe_dark, "Fabric")
+    m.on = "Torso"  # long robe hangs from the waist over the legs
+    m.box("Skirt", [2.15, 2.0, 1.3], [0, 1.1, 0], robe, "Fabric")
+    m.box("SkirtFlare", [2.45, 0.7, 1.55], [0, 0.4, 0], robe, "Fabric")
+    m.box("Hem", [2.5, 0.2, 1.6], [0, 0.12, 0], "team", "Fabric")
     m.box("Sash", [0.4, 2.7, 1.04], [0, 3.0, 0], "team", "Fabric", rot=[0, 0, 35])
     m.box("Belt", [2.06, 0.26, 1.06], [0, 2.1, 0], GOLD, "Metal")
     m.box("Collar", [2.1, 0.3, 1.1], [0, 3.95, 0], robe_light, "Fabric")
     for side, x in (("L", -1.5), ("R", 1.5)):
-        m.box("Arm" + side, [1, 2, 1], [x, 3, 0], robe, "Fabric")
+        m.on = ARM[side]
         m.box("Cuff" + side, [1.24, 0.55, 1.24], [x, 2.25, 0], robe_light, "Fabric")
         m.box("Hand" + side, [0.8, 0.5, 0.8], [x, 1.75, 0], SKIN)
-    m.cyl("Head", 1.2, 1.3, [0, 4.6, 0], SKIN)
-    face(m, 4.75)
-    m.box("Beard", [1.0, 0.9, 0.3], [0, 4.1, -0.58], WHITE, "Fabric")
-    m.box("BeardTip", [0.6, 0.45, 0.28], [0, 3.45, -0.58], WHITE, "Fabric")
-    m.cyl("HatBrim", 0.16, 2.8, [0, 5.25, 0], robe_dark, "Fabric")
-    m.cyl("HatBand", 0.24, 1.66, [0, 5.44, 0], "team", "Fabric")
-    m.cyl("HatLow", 0.55, 1.6, [0, 5.6, 0], robe_dark, "Fabric")
-    m.cyl("HatMid", 0.6, 1.2, [0.05, 6.15, 0.05], robe_dark, "Fabric", rot=[6, 0, -6])
-    m.cyl("HatHigh", 0.55, 0.8, [0.15, 6.65, 0.12], robe_dark, "Fabric", rot=[12, 0, -14])
-    m.ball("HatStar", 0.42, [0.3, 7.02, 0.22], GOLD, "Neon")
-    # staff in the right hand
+    face(m)
+    m.box("Beard", [1.0, 0.9, 0.3], [0, 4.0, -0.66], WHITE, "Fabric")
+    m.box("BeardTip", [0.6, 0.45, 0.28], [0, 3.35, -0.66], WHITE, "Fabric")
+    m.cyl("HatBrim", 0.16, 2.8, [0, 5.15, 0], robe_dark, "Fabric")
+    m.cyl("HatBand", 0.24, 1.66, [0, 5.34, 0], "team", "Fabric")
+    m.cyl("HatLow", 0.55, 1.6, [0, 5.5, 0], robe_dark, "Fabric")
+    m.cyl("HatMid", 0.6, 1.2, [0.05, 6.05, 0.05], robe_dark, "Fabric", rot=[6, 0, -6])
+    m.cyl("HatHigh", 0.55, 0.8, [0.15, 6.55, 0.12], robe_dark, "Fabric", rot=[12, 0, -14])
+    m.ball("HatStar", 0.42, [0.3, 6.92, 0.22], GOLD, "Neon")
+    m.on = "Right Arm"
     m.box("Staff", [0.24, 5.4, 0.24], [1.5, 2.6, -0.55], WOOD, "Wood")
     m.cyl("StaffRing", 0.14, 1.05, [1.5, 5.4, -0.55], GOLD, "Metal", rot=[90, 0, 0])
     m.box("StaffClawL", [0.14, 0.6, 0.14], [1.15, 5.55, -0.55], GOLD, "Metal", rot=[0, 0, 25])
     m.box("StaffClawR", [0.14, 0.6, 0.14], [1.85, 5.55, -0.55], GOLD, "Metal", rot=[0, 0, -25])
     m.ball("StaffOrb", 0.8, [1.5, 5.45, -0.55], orb, "Neon")
+    m.on = "Left Arm"
     m.ball("HandOrb", 0.55, [-1.5, 1.25, -0.25], orb, "Neon", alpha=0.25)
     return m.build()
 
 
 def ranger():
     tunic, tunic_dark = [64, 122, 62], [36, 78, 42]
-    m = M("Torso", bar_top=7.0)
+    m = r6(6.9, tunic, tunic, [96, 72, 46], "Fabric")
     for side, x in (("L", -0.5), ("R", 0.5)):
-        m.box("Leg" + side, [1, 2, 1], [x, 1, 0], [96, 72, 46], "Fabric")
+        m.on = LEG[side]
         m.box("Boot" + side, [1.06, 0.8, 1.12], [x, 0.4, -0.03], LEATHER_DARK, "Fabric")
-    m.box("Torso", [2, 2, 1], [0, 3, 0], tunic, "Fabric")
+    m.on = "Torso"
     m.box("TunicSkirt", [2.08, 0.5, 1.08], [0, 1.85, 0], tunic, "Fabric")
     m.box("Belt", [2.08, 0.25, 1.08], [0, 2.15, 0], LEATHER, "Fabric")
     m.box("Strap", [0.3, 2.6, 1.06], [0, 3.0, 0], LEATHER, "Fabric", rot=[0, 0, -38])
-    for side, x in (("L", -1.5), ("R", 1.5)):
-        m.box("Arm" + side, [1, 2, 1], [x, 3, 0], tunic, "Fabric")
-        m.box("Bracer" + side, [1.08, 0.7, 1.08], [x, 2.3, 0], LEATHER, "Fabric")
-        m.box("Hand" + side, [0.8, 0.4, 0.8], [x, 1.8, 0], SKIN)
-    m.cyl("Head", 1.2, 1.3, [0, 4.6, 0], SKIN)
-    face(m, 4.7)
-    m.cyl("Hood", 1.45, 1.6, [0, 4.72, 0.2], tunic_dark, "Fabric")
-    m.wedge("HoodPeak", [1.1, 0.7, 1.0], [0, 5.7, 0.55], tunic_dark, "Fabric")
-    m.box("HoodRim", [1.62, 0.2, 0.5], [0, 5.35, -0.4], tunic_dark, "Fabric")
     m.box("Cape", [1.9, 2.8, 0.1], [0, 2.75, 0.68], "team", "Fabric", rot=[7, 0, 0])
-    # quiver
     m.cyl("Quiver", 2.3, 0.7, [0.55, 3.4, 0.82], LEATHER, "Fabric", rot=[0, 0, -18])
     for i, dx in enumerate((-0.12, 0.08, 0.26)):
         m.box("Arrow%d" % i, [0.08, 0.9, 0.08], [0.98 + dx, 4.8, 0.82 + dx * 0.4], WOOD, "Wood", rot=[0, 0, -18])
         m.box("Fletch%d" % i, [0.06, 0.4, 0.26], [1.12 + dx, 5.2, 0.82 + dx * 0.4], "team", "Fabric", rot=[0, 0, -18])
-    # bow in the left hand, string toward the archer
+    for side, x in (("L", -1.5), ("R", 1.5)):
+        m.on = ARM[side]
+        m.box("Bracer" + side, [1.08, 0.7, 1.08], [x, 2.3, 0], LEATHER, "Fabric")
+        m.box("Hand" + side, [0.8, 0.4, 0.8], [x, 1.8, 0], SKIN)
+    face(m)
+    m.cyl("Hood", 1.45, 1.6, [0, 4.62, 0.2], tunic_dark, "Fabric")
+    m.wedge("HoodPeak", [1.1, 0.7, 1.0], [0, 5.6, 0.55], tunic_dark, "Fabric")
+    m.box("HoodRim", [1.62, 0.2, 0.5], [0, 5.25, -0.4], tunic_dark, "Fabric")
+    m.on = "Left Arm"  # bow, string toward the archer
     a = math.radians(20)
     m.box("BowGrip", [0.22, 0.8, 0.28], [-1.5, 2.2, -0.7], LEATHER_DARK)
     m.box("BowUpper", [0.18, 1.9, 0.2], [-1.5, 2.6 + 0.95 * math.cos(a), -0.7 + 0.95 * math.sin(a)], WOOD, "Wood", rot=[20, 0, 0])
@@ -199,64 +238,66 @@ def ranger():
 
 def guardian():
     gold, bronze, bone = [212, 170, 72], [150, 108, 48], [236, 226, 200]
-    m = M("Torso", bar_top=7.8)
-    for side, x in (("L", -0.65), ("R", 0.65)):
-        m.box("Leg" + side, [1.2, 2.1, 1.2], [x, 1.05, 0], bronze, "Metal")
+    m = r6(7.7, gold, bronze, bronze, "Metal")
+    for side, x in (("L", -0.5), ("R", 0.5)):
+        m.on = LEG[side]
+        m.box("Greave" + side, [1.2, 1.3, 1.2], [x, 0.95, 0], bronze, "Metal")
         m.box("Boot" + side, [1.3, 0.6, 1.4], [x, 0.3, -0.06], gold, "Metal")
-    m.box("Torso", [2.6, 2.4, 1.5], [0, 3.3, 0], gold, "Metal")
-    m.box("Chest", [2.2, 1.2, 0.12], [0, 3.8, -0.8], bronze, "Metal")
-    m.box("Emblem", [0.85, 0.85, 0.1], [0, 3.6, -0.88], "team", "Neon", rot=[0, 0, 45])
-    m.box("Belt", [2.66, 0.35, 1.56], [0, 2.25, 0], bronze, "Metal")
-    m.box("Fauld", [1.6, 0.7, 0.12], [0, 1.85, -0.78], "team", "Fabric")
-    for side, x in (("L", -1.9), ("R", 1.9)):
-        m.box("Arm" + side, [1.2, 2.3, 1.2], [x, 3.2, 0], bronze, "Metal")
-        m.ball("Pauldron" + side, 1.75, [x * 1.02, 4.35, 0], gold, "Metal")
-        m.wedge("Spike" + side, [0.3, 0.7, 0.5], [x * 1.08, 5.35, 0], bone, rot=[0, 90 if x > 0 else -90, 0])
+    m.on = "Torso"  # heavy breastplate makes him look bigger than the R6 body underneath
+    m.box("Breastplate", [2.5, 2.2, 1.5], [0, 3.1, 0], gold, "Metal")
+    m.box("Chest", [2.1, 1.1, 0.1], [0, 3.55, -0.77], bronze, "Metal")
+    m.box("Emblem", [0.85, 0.85, 0.1], [0, 3.4, -0.84], "team", "Neon", rot=[0, 0, 45])
+    m.box("Belt", [2.56, 0.35, 1.56], [0, 2.15, 0], bronze, "Metal")
+    m.box("Fauld", [1.6, 0.7, 0.12], [0, 1.8, -0.76], "team", "Fabric")
+    for side, x in (("L", -1.5), ("R", 1.5)):
+        m.on = ARM[side]
+        m.ball("Pauldron" + side, 1.75, [x * 1.1, 4.1, 0], gold, "Metal")
+        m.wedge("Spike" + side, [0.3, 0.7, 0.5], [x * 1.16, 5.1, 0], bone, rot=[0, 90 if x > 0 else -90, 0])
         m.box("Gauntlet" + side, [1.3, 0.7, 1.3], [x, 2.3, 0], gold, "Metal")
-    m.box("Helmet", [1.7, 1.6, 1.7], [0, 5.3, 0], bronze, "Metal")
-    m.box("HelmetCrest", [0.3, 0.35, 1.8], [0, 6.25, 0], gold, "Metal")
-    m.box("VisorSlit", [1.2, 0.16, 0.08], [0, 5.4, -0.86], "team", "Neon")
-    m.box("HornL", [0.3, 1.2, 0.3], [-1.05, 6.15, 0], bone, rot=[0, 0, 30])
-    m.box("HornR", [0.3, 1.2, 0.3], [1.05, 6.15, 0], bone, rot=[0, 0, -30])
-    # tower shield on the left
-    m.box("Shield", [0.4, 3.6, 2.4], [-2.75, 3.0, -0.5], "team", "Metal", rot=[0, -10, 0])
-    m.box("ShieldFrameTop", [0.44, 0.25, 2.5], [-2.75, 4.85, -0.5], gold, "Metal", rot=[0, -10, 0])
-    m.box("ShieldFrameBot", [0.44, 0.25, 2.5], [-2.75, 1.15, -0.5], gold, "Metal", rot=[0, -10, 0])
-    m.ball("ShieldBoss", 0.9, [-2.98, 3.0, -0.55], gold, "Metal")
-    # hammer on the right
-    m.box("HammerHandle", [0.3, 3.4, 0.3], [1.9, 2.6, -0.75], WOOD, "Wood")
-    m.box("HammerHead", [0.9, 1.0, 1.8], [1.9, 4.3, -0.75], STEEL_DARK, "Metal")
-    m.box("HammerBand", [0.95, 1.05, 0.3], [1.9, 4.3, -0.75], gold, "Metal")
+    m.on = "Head"
+    m.box("Helmet", [1.7, 1.55, 1.7], [0, 4.6, 0], bronze, "Metal")
+    m.box("HelmetCrest", [0.3, 0.35, 1.8], [0, 5.52, 0], gold, "Metal")
+    m.box("VisorSlit", [1.2, 0.16, 0.08], [0, 4.7, -0.86], "team", "Neon")
+    m.box("HornL", [0.3, 1.2, 0.3], [-1.05, 5.45, 0], bone, rot=[0, 0, 30])
+    m.box("HornR", [0.3, 1.2, 0.3], [1.05, 5.45, 0], bone, rot=[0, 0, -30])
+    m.on = "Left Arm"  # tower shield
+    m.box("Shield", [0.4, 3.6, 2.4], [-2.35, 3.0, -0.5], "team", "Metal", rot=[0, -10, 0])
+    m.box("ShieldFrameTop", [0.44, 0.25, 2.5], [-2.35, 4.85, -0.5], gold, "Metal", rot=[0, -10, 0])
+    m.box("ShieldFrameBot", [0.44, 0.25, 2.5], [-2.35, 1.15, -0.5], gold, "Metal", rot=[0, -10, 0])
+    m.ball("ShieldBoss", 0.9, [-2.58, 3.0, -0.55], gold, "Metal")
+    m.on = "Right Arm"  # war hammer
+    m.box("HammerHandle", [0.3, 3.4, 0.3], [1.5, 2.4, -0.75], WOOD, "Wood")
+    m.box("HammerHead", [0.9, 1.0, 1.8], [1.5, 4.1, -0.75], STEEL_DARK, "Metal")
+    m.box("HammerBand", [0.95, 1.05, 0.3], [1.5, 4.1, -0.75], gold, "Metal")
     return m.build()
 
 
 def assassin():
     cloth, dark = [48, 48, 60], [26, 26, 32]
-    m = M("Torso", bar_top=7.0)
-    for side, x in (("L", -0.45), ("R", 0.45)):
-        m.box("Leg" + side, [0.9, 2, 0.9], [x, 1, 0], cloth, "Fabric")
-        m.box("Wrap" + side, [0.94, 0.25, 0.94], [x, 1.2, 0], "teamDark", "Fabric")
-        m.box("Boot" + side, [0.96, 0.6, 1.0], [x, 0.3, -0.03], dark, "Fabric")
-    m.box("Torso", [1.8, 2, 0.9], [0, 3, 0], cloth, "Fabric")
-    m.box("Vest", [1.6, 1.6, 0.08], [0, 3.1, -0.48], dark, "Fabric")
-    m.box("Belt", [1.86, 0.25, 0.96], [0, 2.1, 0], dark, "Fabric")
-    m.box("PouchL", [0.4, 0.4, 0.3], [-0.6, 2.0, -0.55], LEATHER)
-    m.box("PouchR", [0.4, 0.4, 0.3], [0.6, 2.0, -0.55], LEATHER)
-    for side, x in (("L", -1.32), ("R", 1.32)):
-        m.box("Arm" + side, [0.85, 2, 0.85], [x, 3, 0], cloth, "Fabric")
-        m.box("Bracer" + side, [0.92, 0.6, 0.92], [x, 2.3, 0], dark, "Fabric")
-        # reverse-grip daggers pointing forward
+    m = r6(6.9, cloth, cloth, cloth, "Fabric")
+    for side, x in (("L", -0.5), ("R", 0.5)):
+        m.on = LEG[side]
+        m.box("Wrap" + side, [1.04, 0.25, 1.04], [x, 1.2, 0], "teamDark", "Fabric")
+        m.box("Boot" + side, [1.06, 0.6, 1.1], [x, 0.3, -0.03], dark, "Fabric")
+    m.on = "Torso"
+    m.box("Vest", [1.7, 1.6, 0.08], [0, 3.1, -0.53], dark, "Fabric")
+    m.box("Belt", [2.06, 0.25, 1.06], [0, 2.1, 0], dark, "Fabric")
+    m.box("PouchL", [0.4, 0.4, 0.3], [-0.6, 2.0, -0.6], LEATHER)
+    m.box("PouchR", [0.4, 0.4, 0.3], [0.6, 2.0, -0.6], LEATHER)
+    m.box("Scarf", [1.6, 0.4, 1.15], [0, 3.95, 0], "team", "Fabric")
+    m.box("ScarfTail", [0.4, 1.6, 0.08], [0.45, 3.3, 0.62], "team", "Fabric", rot=[18, 0, -8])
+    for side, x in (("L", -1.5), ("R", 1.5)):
+        m.on = ARM[side]  # reverse-grip daggers pointing forward
+        m.box("Bracer" + side, [1.06, 0.6, 1.06], [x, 2.3, 0], dark, "Fabric")
         m.box("Grip" + side, [0.2, 0.2, 0.6], [x, 1.95, -0.35], LEATHER_DARK)
         m.box("Guard" + side, [0.55, 0.15, 0.15], [x, 1.95, -0.7], STEEL_DARK, "Metal")
         m.box("Dagger" + side, [0.22, 0.08, 1.6], [x, 1.95, -1.55], BLADE, "Metal")
-    m.cyl("Head", 1.2, 1.25, [0, 4.6, 0], SKIN)
-    m.cyl("Hood", 1.45, 1.5, [0, 4.72, 0.15], dark, "Fabric")
-    m.wedge("HoodPeak", [1.0, 0.75, 1.0], [0, 5.75, 0.45], dark, "Fabric")
-    m.box("Mask", [1.3, 0.6, 0.08], [0, 4.35, -0.64], BLACK, "Fabric")
-    m.box("EyeL", [0.3, 0.1, 0.05], [-0.28, 4.8, -0.64], "team", "Neon")
-    m.box("EyeR", [0.3, 0.1, 0.05], [0.28, 4.8, -0.64], "team", "Neon")
-    m.box("Scarf", [1.55, 0.4, 1.1], [0, 4.0, 0], "team", "Fabric")
-    m.box("ScarfTail", [0.4, 1.6, 0.08], [0.45, 3.3, 0.62], "team", "Fabric", rot=[18, 0, -8])
+    m.on = "Head"
+    m.cyl("Hood", 1.45, 1.5, [0, 4.62, 0.15], dark, "Fabric")
+    m.wedge("HoodPeak", [1.0, 0.75, 1.0], [0, 5.65, 0.45], dark, "Fabric")
+    m.box("Mask", [1.3, 0.6, 0.08], [0, 4.25, -0.66], BLACK, "Fabric")
+    m.box("EyeL", [0.3, 0.1, 0.05], [-0.28, 4.7, -0.66], "team", "Neon")
+    m.box("EyeR", [0.3, 0.1, 0.05], [0.28, 4.7, -0.66], "team", "Neon")
     return m.build()
 
 

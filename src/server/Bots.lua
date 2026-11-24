@@ -8,6 +8,7 @@ local HeroService = require(script.Parent.HeroService)
 local Abilities = require(script.Parent.Abilities)
 local Structures = require(script.Parent.Structures)
 local ModelFactory = require(script.Parent.ModelFactory)
+local Animations = require(script.Parent.Animations)
 
 local flat = Units.flat
 local Bots = {}
@@ -28,7 +29,7 @@ local function buildModel(u, pos)
 	u.rootY = Config.GroundY + info.rootY
 	u.barHeight = info.barHeight
 	model.Parent = workspace:WaitForChild("Units")
-	return model, root
+	return model, root, info
 end
 
 ---------------------------------------------------------------------------
@@ -240,8 +241,9 @@ function Bots.create(team, heroId, lane)
 	u.kinematic = true
 	u.moveDir = Vector3.zero
 	u.customSpawn = function(self, pos)
-		local model, root = buildModel(self, pos)
+		local model, root, info = buildModel(self, pos)
 		Units.attach(self, model, root)
+		self.anim = Animations.attach(info.humanoid)
 		self.wp = 2
 		self.retreating = false
 		self.moveDir = Vector3.zero
@@ -271,6 +273,10 @@ function Bots.step(dt)
 		if Units.valid(u) then
 			if doThink then
 				think(u)
+				if u.anim then
+					local moving = u.moveDir and u.moveDir.Magnitude > 0.01
+					u.anim.setMoving(moving and Units.getSpeed(u) or 0)
+				end
 			end
 			Units.stepMove(u, dt)
 		end

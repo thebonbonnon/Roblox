@@ -117,6 +117,7 @@
         <div class="loading" id="loading">Loading 3D viewer…</div>
         <div class="stage-tools">
           <button id="toggle-bars" aria-pressed="true" title="Shown on single models">Health bars</button>
+          <button id="toggle-walk" aria-pressed="true">Walk</button>
           <button id="toggle-spin" aria-pressed="true">Auto-rotate</button>
         </div>
         <div class="hint">Drag to orbit · scroll or pinch to zoom · right-drag to pan</div>
@@ -161,17 +162,17 @@
   function specParts(name, team) {
     return SPECS[name].parts.map(p => ({
       name: p.name, shape: p.shape, size: p.size.slice(), pos: p.pos, rot: p.rot,
-      color: resolve(p.color, team), mat: p.material, alpha: p.alpha,
+      color: resolve(p.color, team), mat: p.material, alpha: p.alpha, attach: p.attach,
     }));
   }
   const partCount = name => SPECS[name].parts.length;
   function botHero(id, team) {
     const h = HEROES[id], name = "Hero_" + id;
     return {
-      parts: specParts(name, team), bar: { y: SPECS[name].barTop, w: 100, h: 9, name: `Bot ${id}  Lv1`, team },
-      title: id, kind: "Hero (bot)",
+      parts: specParts(name, team), rig: true, bar: { y: SPECS[name].barTop, w: 100, h: 9, name: `Bot ${id}  Lv1`, team },
+      title: id, kind: "Hero · R6 rig",
       meta: [["Role", h.role], ["Attack", h.ranged ? `Ranged, ${h.range} studs` : `Melee, ${h.range} studs`], ["Base HP", h.hp], ["Parts", partCount(name)]],
-      text: `${h.desc} Abilities: ${h.abil}. Bots use this body. Player-controlled heroes keep their own Roblox avatar, with the same health bar and name tag on top.`,
+      text: `${h.desc} Abilities: ${h.abil}. A real R6 rig: HumanoidRootPart, Torso, Head, two arms and two legs at standard R6 sizes, joined by Motor6Ds (RootJoint, Neck, shoulders, hips), with every piece of gear welded to its limb. Bots play Roblox's R6 idle, walk and slash animations. Players on R6 avatars wear this same gear over their own avatar.`,
       src: `tools/gen_models.py · ${id.toLowerCase()}()  →  ModelSpecs.json "${name}"`,
     };
   }
@@ -310,7 +311,7 @@
   }
 
   const CATALOG = [
-    { group: "Heroes", items: Object.keys(HEROES).map(id => ({ key: "hero-" + id, label: id, tag: HEROES[id].ranged ? "ranged" : "melee", make: t => botHero(id, t) })) },
+    { group: "Heroes (R6)", items: Object.keys(HEROES).map(id => ({ key: "hero-" + id, label: id, tag: HEROES[id].ranged ? "ranged" : "melee", make: t => botHero(id, t) })) },
     { group: "Minions", items: Object.keys(MINIONS).map(k => ({ key: "minion-" + k, label: k[0].toUpperCase() + k.slice(1), tag: MINIONS[k].hp + " hp", make: t => minion(k, t) })) },
     { group: "Structures", items: [
       { key: "tower", label: "Tower", tag: "3000 hp", make: tower },
@@ -326,7 +327,7 @@
 
   // ---------------------------------------------------------------- UI
   const nav = document.getElementById("nav"), info = document.getElementById("info");
-  let current = "hero-Knight", team = "Blue", showBars = true, spin = true;
+  let current = "hero-Knight", team = "Blue", showBars = true, spin = true, walk = true;
   try { const saved = localStorage.getItem("moba-viewer"); if (saved) { const s = JSON.parse(saved); current = s.current || current; team = s.team || team; } } catch (e) {}
   const save = () => { try { localStorage.setItem("moba-viewer", JSON.stringify({ current, team })); } catch (e) {} };
 
@@ -344,20 +345,21 @@
   nav.addEventListener("click", e => { const b = e.target.closest("button[data-key]"); if (b) { current = b.dataset.key; save(); show(); } });
   document.querySelectorAll(".team-toggle button").forEach(b => b.addEventListener("click", () => { team = b.dataset.team; save(); show(); }));
   document.getElementById("toggle-bars").addEventListener("click", e => { showBars = !showBars; e.currentTarget.setAttribute("aria-pressed", showBars); show(true); });
+  document.getElementById("toggle-walk").addEventListener("click", e => { walk = !walk; e.currentTarget.setAttribute("aria-pressed", walk); });
   document.getElementById("toggle-spin").addEventListener("click", e => { spin = !spin; e.currentTarget.setAttribute("aria-pressed", spin); if (controls) controls.autoRotate = spin; });
 
   const hex = c => "#" + c.map(v => v.toString(16).padStart(2, "0")).join("");
   const fmt = n => (Math.round(n * 100) / 100).toString();
   function renderInfo(m) {
     const rows = (m.parts || []).filter(p => !m.map || ["Ground", "River"].includes(p.name)).map(p => {
-      const size = p.shape === "ball" ? `${fmt(p.size[0])} diameter` : p.shape === "cyl" ? `${fmt(p.size[0])} tall × ${fmt(p.size[1])} wide` : p.size.map(fmt).join(" × ");
-      return `<tr><td>${p.name}</td><td>${{ box: "Block", ball: "Ball", cyl: "Cylinder", wedge: "Wedge" }[p.shape]}</td><td class="mono">${size}</td><td class="mono">${p.pos.map(fmt).join(", ")}</td><td><span class="swatch" style="background:${hex(p.color)}"></span>${p.mat}${p.alpha ? ` · ${Math.round(p.alpha * 100)}% transparent` : ""}</td></tr>`;
+      const size = p.shape === "head" ? "2 × 1 × 1 (Head mesh ×1.25)" : p.shape === "ball" ? `${fmt(p.size[0])} diameter` : p.shape === "cyl" ? `${fmt(p.size[0])} tall × ${fmt(p.size[1])} wide` : p.size.map(fmt).join(" × ");
+      return `<tr><td>${p.name}</td><td>${{ box: "Block", ball: "Ball", cyl: "Cylinder", wedge: "Wedge", head: "R6 head" }[p.shape]}</td><td class="mono">${size}</td><td class="mono">${p.pos.map(fmt).join(", ")}</td><td><span class="swatch" style="background:${hex(p.color)}"></span>${p.mat}${p.alpha >= 1 ? " · invisible" : p.alpha ? ` · ${Math.round(p.alpha * 100)}% transparent` : ""}</td>${m.rig ? `<td>${p.attach || (p.name === "HumanoidRootPart" ? "root (anchored)" : "Motor6D joint")}</td>` : ""}</tr>`;
     }).join("");
     info.innerHTML = `
       <div class="meta"><span><b>${m.kind}</b></span>${m.meta.map(([k, v]) => `<span>${k}: <b>${v}</b></span>`).join("")}</div>
       <h2>${m.title}</h2>
       <p>${m.text}</p>
-      ${rows ? `<details${m.map ? " open" : ""}><summary>${m.map ? "Ground layers" : "All " + m.parts.length + " parts"}</summary><div class="table-wrap"><table><thead><tr><th>Part</th><th>Shape</th><th>Size (studs)</th><th>Position</th><th>Material</th></tr></thead><tbody>${rows}</tbody></table></div></details>` : ""}
+      ${rows ? `<details${m.map ? " open" : ""}><summary>${m.map ? "Ground layers" : "All " + m.parts.length + " parts"}</summary><div class="table-wrap"><table><thead><tr><th>Part</th><th>Shape</th><th>Size (studs)</th><th>Position</th><th>Material</th>${m.rig ? "<th>Welded to</th>" : ""}</tr></thead><tbody>${rows}</tbody></table></div></details>` : ""}
       <div class="src">${m.src}</div>`;
   }
 
@@ -386,7 +388,17 @@
     scene.add(sun, sun.target);
     applyTheme();
     new ResizeObserver(resize).observe(stage); resize();
-    renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+    const clock = new THREE.Clock();
+    renderer.setAnimationLoop(() => {
+      const t = clock.getElapsedTime();
+      for (const r of rigs) {
+        const s = walk ? Math.sin(t * 7 + r.phase) : 0, L = r.limbs;
+        L["Left Arm"].rotation.x = s * 0.75; L["Right Arm"].rotation.x = -s * 0.75;
+        L["Left Leg"].rotation.x = -s * 0.75; L["Right Leg"].rotation.x = s * 0.75;
+        L.Head.rotation.y = walk ? Math.sin(t * 1.3 + r.phase) * 0.15 : 0;
+      }
+      controls.update(); renderer.render(scene, camera);
+    });
     return true;
   }
   function applyTheme() { if (scene) scene.background = new THREE.Color(css("--stage")); }
@@ -407,6 +419,7 @@
     if (mat === "marble") Object.assign(opts, { roughness: 0.35 });
     if (mat === "fabric" || mat === "grass") Object.assign(opts, { roughness: 0.95 });
     if (p.alpha) Object.assign(opts, { transparent: true, opacity: 1 - p.alpha, depthWrite: false });
+    if (p.alpha >= 1) opts.visible = false;
     return (matCache[key] = new THREE.MeshStandardMaterial(opts));
   }
   // Roblox WedgePart: full-height face at the back (+Z), sloping down to the front (-Z).
@@ -424,6 +437,7 @@
     if (geoCache[key]) return geoCache[key];
     let g;
     if (p.shape === "ball") g = new THREE.SphereGeometry(p.size[0] / 2, 32, 20);
+    else if (p.shape === "head") g = new THREE.CylinderGeometry(0.62, 0.62, 1.25, 32);
     else if (p.shape === "cyl") g = new THREE.CylinderGeometry(p.size[1] / 2, p.size[1] / 2, p.size[0], 40);
     else if (p.shape === "wedge") g = wedgeGeometry(p.size[0] / 2, p.size[1] / 2, p.size[2] / 2);
     else g = new THREE.BoxGeometry(p.size[0], p.size[1], p.size[2]);
@@ -453,9 +467,22 @@
     return s;
   }
   let noBars = false;
+  // R6 joint points (shoulders, hips, neck) for the walk preview.
+  const R6_PIVOTS = { "Left Arm": [-1.5, 3.5, 0], "Right Arm": [1.5, 3.5, 0], "Left Leg": [-0.5, 2, 0], "Right Leg": [0.5, 2, 0], "Head": [0, 4, 0] };
+  let rigs = [];
   function buildModel(m, parent, at) {
     const grp = new THREE.Group();
-    for (const p of m.parts) grp.add(makePart(p));
+    if (m.rig) {
+      const limbs = {};
+      for (const k in R6_PIVOTS) { const g = new THREE.Group(); g.position.set(...R6_PIVOTS[k]); grp.add(g); limbs[k] = g; }
+      for (const p of m.parts) {
+        const mesh = makePart(p), limb = limbs[R6_PIVOTS[p.name] ? p.name : p.attach];
+        if (limb) { mesh.position.sub(limb.position); limb.add(mesh); } else grp.add(mesh);
+      }
+      rigs.push({ limbs, phase: rigs.length * 0.7 });
+    } else {
+      for (const p of m.parts) grp.add(makePart(p));
+    }
     if (showBars && m.bar && !noBars) { const s = barSprite(m.bar); s.position.set(0, m.bar.y, 0); grp.add(s); }
     if (at) grp.position.set(at[0], 0, at[1]);
     parent.add(grp);
@@ -470,6 +497,7 @@
     if (!renderer) return;
     if (root) scene.remove(root);
     root = new THREE.Group(); scene.add(root);
+    rigs = [];
 
     noBars = !!(m.map || m.extra);
     buildModel(m, root);

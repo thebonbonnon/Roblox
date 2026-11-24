@@ -45,12 +45,20 @@ This project uses [Rojo](https://rojo.space).
 4. Press **Play**. To test teams, use *Test → Clients and Servers* with several players.
 5. Before publishing, set **Max Players = 10** in Game Settings.
 
+## R6
+
+The game is built around **R6**:
+
+- **Bot heroes are real R6 rigs.** Each one has a Humanoid, HumanoidRootPart and the six standard R6 parts, joined by the standard Motor6Ds (RootJoint, Neck, shoulders, hips). They play Roblox's own R6 idle, walk and sword-slash animations.
+- **Players wear their hero's gear.** When a player spawns as, say, the Knight, the helmet, tabard, pauldrons, sword and shield are welded onto their own R6 avatar. Hats and hair are removed when the hero wears a helmet or hood. Basic attacks and ability casts play a slash or lunge animation.
+- **One setting to change in Studio:** *Game Settings → Avatar → Avatar Type → R6*. Scripts can't change this. If players spawn as R15, the game still works, but players won't get hero gear and the Output shows a reminder.
+
 ## Models
 
 Every unit is built from Roblox parts, with no assets needed: armored heroes with weapons and shields, soldier/caster/cannon-cart minions, castle-style towers, a crystal nexus and leafy trees (256 parts across 11 models).
 
 - The models are defined in `tools/gen_models.py`. Run `python3 tools/gen_models.py` after editing it. It writes `src/shared/ModelSpecs.json` (which the game builds from) and `tools/model-viewer.html`, a 3D preview you can open in a browser.
-- **Swap in your own models (Creator Store, Blender, etc.):** create a folder named `Models` in `ServerStorage` and put a Model inside with one of these names: `Hero_Knight`, `Hero_Mage`, `Hero_Ranger`, `Hero_Guardian`, `Hero_Assassin`, `Minion_melee`, `Minion_caster`, `Minion_siege`, `Tower`, `Nexus`, `Tree`. The game then uses it instead of the built-in one. It is scaled to the same height, scripts inside it are deleted, and any part whose name starts with `Team` is recolored to the team color. Models should face -Z (the front in Studio).
+- **Swap in your own models (Creator Store, Blender, etc.):** create a folder named `Models` in `ServerStorage` and put a Model inside with one of these names: `Hero_Knight`, `Hero_Mage`, `Hero_Ranger`, `Hero_Guardian`, `Hero_Assassin`, `Minion_melee`, `Minion_caster`, `Minion_siege`, `Tower`, `Nexus`, `Tree`. The game then uses it instead of the built-in one. It is scaled to the same height, scripts inside it are deleted, and any part whose name starts with `Team` is recolored to the team color. Models should face -Z (the front in Studio). Drop-in hero models are used as rigid statues (no animation); to animate one, give it the same R6 part and joint names.
 - Free models can contain malicious scripts. The loader strips them, but still prefer verified creators.
 
 ## Project layout
@@ -75,7 +83,8 @@ src/
     Bots.lua         AI heroes
     MapBuilder.lua   procedural map
     Effects.lua      visual effects
-    ModelFactory.lua builds models from ModelSpecs.json or your drop-in Models folder
+    ModelFactory.lua builds models (R6 hero rigs) from ModelSpecs.json or your drop-in Models folder
+    Animations.lua   Roblox's default R6 idle / walk / slash animations
     Net.lua          RemoteEvents
   client/          -> StarterPlayerScripts.Client
     Main.client.lua  camera, input, click-to-move

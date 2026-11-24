@@ -11,6 +11,8 @@ local HeroDefs = require(ReplicatedStorage.Shared.Heroes)
 local Items = require(ReplicatedStorage.Shared.Items)
 local Units = require(script.Parent.Units)
 local Effects = require(script.Parent.Effects)
+local ModelFactory = require(script.Parent.ModelFactory)
+local Animations = require(script.Parent.Animations)
 
 local flat = Units.flat
 
@@ -185,6 +187,16 @@ function HeroService.spawn(u)
 		char:SetAttribute("HeroId", u.heroId)
 		Units.attach(u, char, hrp)
 		u.alive = true
+		-- R6 players wear their hero's gear and get attack animations (the Animate script that
+		-- comes with the character already handles walking and idling).
+		u.anim = nil
+		if hum.RigType == Enum.HumanoidRigType.R6 then
+			ModelFactory.attachGear("Hero_" .. u.heroId, char, u.team)
+			u.anim = Animations.attach(hum, { actionsOnly = true })
+		elseif not HeroService.warnedR15 then
+			HeroService.warnedR15 = true
+			warn("[MOBA] Players are spawning as R15. Set Game Settings > Avatar > Avatar Type to R6 so they wear hero gear.")
+		end
 		hum.Died:Connect(function()
 			if u.model == char and u.alive then
 				Units.kill(u, nil)

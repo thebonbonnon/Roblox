@@ -12,6 +12,12 @@
 	  info.rootY      root part height above the ground point
 	  info.barHeight  health bar offset above the root
 	  info.fire       part that projectiles are fired from (if the spec names one)
+	  info.humanoid   the rig's Humanoid (R6 heroes only)
+
+	Heroes are real R6 rigs: HumanoidRootPart (anchored, moved by the server) -> RootJoint ->
+	Torso -> Neck / shoulders / hips, using the standard R6 joint frames so Roblox's R6 animations
+	play correctly. Gear parts are welded to the limb named in their spec "attach" field.
+	ModelFactory.attachGear puts the same gear on a player's R6 character.
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
@@ -61,6 +67,33 @@ local function partSize(p, scale)
 	return Vector3.new(s[1], s[2], s[3]) * scale
 end
 
+local function makePart(p, team, cframe, scale)
+	local part = Instance.new(p.shape == "wedge" and "WedgePart" or "Part")
+	if p.shape == "ball" then
+		part.Shape = Enum.PartType.Ball
+	elseif p.shape == "cyl" then
+		part.Shape = Enum.PartType.Cylinder
+	end
+	part.Name = p.name
+	part.Size = partSize(p, scale)
+	part.CFrame = cframe
+	part.Color = resolveColor(p.color, team)
+	part.Material = Enum.Material[p.material] or Enum.Material.SmoothPlastic
+	part.Transparency = p.alpha or 0
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.CastShadow = (p.alpha or 0) < 0.5
+	part.CanCollide = p.collide == true
+	part.CanTouch = false
+	if p.shape == "head" then
+		local mesh = Instance.new("SpecialMesh")
+		mesh.MeshType = Enum.MeshType.Head
+		mesh.Scale = Vector3.one * 1.25
+		mesh.Parent = part
+	end
+	return part
+end
+
 local function weld(root, part)
 	local w = Instance.new("WeldConstraint")
 	w.Part0 = root
@@ -84,23 +117,7 @@ local function buildFromSpec(spec, opts, scale)
 	local root, fire
 	local parts = {}
 	for _, p in ipairs(spec.parts) do
-		local part = Instance.new(p.shape == "wedge" and "WedgePart" or "Part")
-		if p.shape == "ball" then
-			part.Shape = Enum.PartType.Ball
-		elseif p.shape == "cyl" then
-			part.Shape = Enum.PartType.Cylinder
-		end
-		part.Name = p.name
-		part.Size = partSize(p, scale)
-		part.CFrame = opts.cframe * localCFrame(p, scale)
-		part.Color = resolveColor(p.color, opts.team)
-		part.Material = Enum.Material[p.material] or Enum.Material.SmoothPlastic
-		part.Transparency = p.alpha or 0
-		part.TopSurface = Enum.SurfaceType.Smooth
-		part.BottomSurface = Enum.SurfaceType.Smooth
-		part.CastShadow = (p.alpha or 0) < 0.5
-		part.CanCollide = p.collide == true
-		part.CanTouch = false
+		local part = makePart(p, opts.team, opts.cframe * localCFrame(p, scale), scale)
 		part.Parent = model
 		parts[#parts + 1] = part
 		if p.name == spec.root then
@@ -176,6 +193,121 @@ local function buildFromCustom(template, spec, opts, scale)
 	return model, root, fire, parts
 end
 
+---------------------------------------------------------------------------
+-- R6 rigs
+---------------------------------------------------------------------------
+local R6_LIMBS = { "Torso", "Head", "Left Arm", "Right Arm", "Left Leg", "Right Leg" }
+-- Standard R6 joint orientations (the same C0/C1 rotations Roblox's own R6 rig uses).
+local ROOT_ROT = CFrame.new(0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 1, 0)
+local RIGHT_ROT = CFrame.new(0, 0, 0, 0, 0, 1, 0, 1, 0, -1, 0, 0)
+local LEFT_ROT = CFrame.new(0, 0, 0, 0, 0, -1, 0, 1, 0, 1, 0, 0)
+
+local function motor(name, part0, part1, c0)
+	local m = Instance.new("Motor6D")
+	m.Name = name
+	m.Part0 = part0
+	m.Part1 = part1
+	m.C0 = c0
+	-- C1 keeps Part1 exactly where the spec placed it.
+	m.C1 = part1.CFrame:Inverse() * (part0.CFrame * c0)
+	m.Parent = part0
+	return m
+end
+
+local function assembleR6(model, parts)
+	local byName = {}
+	for _, part in ipairs(parts) do
+		byName[part.Name] = part
+	end
+	local hrp, torso = byName.HumanoidRootPart, byName.Torso
+	local hx, hy = torso.Size.X / 2, torso.Size.Y / 2
+
+	for _, part in ipairs(parts) do
+		part.Anchored = part == hrp
+		if part ~= hrp then
+			part.Massless = true
+		end
+	end
+	hrp.CanCollide = false
+	motor("RootJoint", hrp, torso, ROOT_ROT)
+	motor("Neck", torso, byName.Head, CFrame.new(0, hy, 0) * ROOT_ROT)
+	motor("Right Shoulder", torso, byName["Right Arm"], CFrame.new(hx, hy - 0.5, 0) * RIGHT_ROT)
+	motor("Left Shoulder", torso, byName["Left Arm"], CFrame.new(-hx, hy - 0.5, 0) * LEFT_ROT)
+	motor("Right Hip", torso, byName["Right Leg"], CFrame.new(hx, -hy, 0) * RIGHT_ROT)
+	motor("Left Hip", torso, byName["Left Leg"], CFrame.new(-hx, -hy, 0) * LEFT_ROT)
+
+	local humanoid = Instance.new("Humanoid")
+	humanoid.RigType = Enum.HumanoidRigType.R6
+	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+	humanoid.BreakJointsOnDeath = false
+	humanoid.RequiresNeck = false
+	humanoid.EvaluateStateMachine = false -- the server moves bots directly; only animations are needed
+	Instance.new("Animator").Parent = humanoid
+	humanoid.Parent = model
+	return humanoid
+end
+
+-- Welds each gear part to the limb its spec names.
+local function weldGear(spec, parts)
+	local byName = {}
+	for _, part in ipairs(parts) do
+		byName[part.Name] = part
+	end
+	for _, p in ipairs(spec.parts) do
+		if p.attach then
+			weld(byName[p.attach], byName[p.name])
+		end
+	end
+end
+
+-- Puts a hero's gear (armor, helmet, weapon, shield...) onto a player's R6 character.
+-- Returns false if the character isn't R6.
+function ModelFactory.attachGear(name, character, team)
+	local spec = Specs[name]
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not spec or spec.rig ~= "R6" or not humanoid or humanoid.RigType ~= Enum.HumanoidRigType.R6 then
+		return false
+	end
+	local limbLocal = {}
+	for _, p in ipairs(spec.parts) do
+		if table.find(R6_LIMBS, p.name) then
+			limbLocal[p.name] = localCFrame(p, 1)
+		end
+	end
+	local folder = Instance.new("Folder")
+	folder.Name = "HeroGear"
+	local coversHead = false
+	for _, p in ipairs(spec.parts) do
+		-- Players keep their own face, so skip the painted-on bot eyes (glowing visor eyes stay).
+		local paintedEye = string.sub(p.name, 1, 3) == "Eye" and p.material ~= "Neon"
+		local limb = p.attach and not paintedEye and character:FindFirstChild(p.attach)
+		if limb and limb:IsA("BasePart") then
+			local offset = limbLocal[p.attach]:Inverse() * localCFrame(p, 1)
+			local part = makePart(p, team, limb.CFrame * offset, 1)
+			part.Anchored = false
+			part.CanCollide = false
+			part.CanQuery = false
+			part.Massless = true
+			weld(limb, part)
+			part.Parent = folder
+			if p.attach == "Head" and math.max(table.unpack(p.size)) >= 1.4 then
+				coversHead = true -- helmet, hood or hat
+			end
+		end
+	end
+	-- Hats and hair would poke through helmets and hoods.
+	if coversHead then
+		for _, acc in ipairs(character:GetChildren()) do
+			if acc:IsA("Accessory") and (acc.AccessoryType == Enum.AccessoryType.Hat or acc.AccessoryType == Enum.AccessoryType.Hair) then
+				acc:Destroy()
+			end
+		end
+	end
+	folder.Parent = character
+	return true
+end
+
 function ModelFactory.has(name)
 	return Specs[name] ~= nil
 end
@@ -197,13 +329,19 @@ function ModelFactory.build(name, opts)
 
 	-- Static models (structures, trees) stay fully anchored. Moving units are one rigid assembly:
 	-- the anchored root is moved by the server and everything else is welded to it.
-	for _, part in ipairs(parts) do
-		if opts.static or part == root then
-			part.Anchored = true
-		else
-			part.Anchored = false
-			part.Massless = true
-			weld(root, part)
+	local humanoid
+	if spec.rig == "R6" and not custom then
+		humanoid = assembleR6(model, parts)
+		weldGear(spec, parts)
+	else
+		for _, part in ipairs(parts) do
+			if opts.static or part == root then
+				part.Anchored = true
+			else
+				part.Anchored = false
+				part.Massless = true
+				weld(root, part)
+			end
 		end
 	end
 
@@ -224,6 +362,7 @@ function ModelFactory.build(name, opts)
 		barHeight = spec.barTop * scale - rootY,
 		fire = fire,
 		height = spec.height * scale,
+		humanoid = humanoid,
 	}
 end
 
