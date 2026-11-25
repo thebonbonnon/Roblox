@@ -268,7 +268,7 @@ function ModelFactory.attachGear(name, character, team)
 		local isBody = body[part.Name] == part
 		-- Players keep their own face, so skip painted-on bot eyes (glowing visor eyes stay).
 		local paintedEye = string.sub(part.Name, 1, 3) == "Eye" and part.Material ~= Enum.Material.Neon
-		if not isBody and not paintedEye then
+		if not isBody and not paintedEye and not part:GetAttribute("BodySkin") then
 			local limbName = ModelBuilder.limbFor(part, body)
 			local srcLimb, dstLimb = body[limbName], character:FindFirstChild(limbName)
 			if srcLimb and dstLimb and dstLimb:IsA("BasePart") then

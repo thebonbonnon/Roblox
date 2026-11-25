@@ -13,7 +13,7 @@
 ]]
 local Heroes = {}
 
-Heroes.Order = { "Knight", "Mage", "Ranger", "Guardian", "Assassin" }
+Heroes.Order = { "Knight", "Mage", "Ranger", "Guardian", "Assassin", "Gunslinger" }
 
 Heroes.Defs = {
 	Knight = {
@@ -40,7 +40,7 @@ Heroes.Defs = {
 		color = Color3.fromRGB(150, 90, 230),
 		hp = 470, hpPerLevel = 70, mana = 520, manaPerLevel = 45, manaRegen = 7,
 		damage = 42, damagePerLevel = 3, armor = 15, armorPerLevel = 1.5,
-		range = 28, attackCd = 1.15, speed = 16, ranged = true,
+		range = 40, attackCd = 1.15, speed = 16, ranged = true,
 		build = { "Tome", "Sapphire", "ArchStaff", "Boots", "Ruby", "ArchStaff" },
 		abilities = {
 			Q = { name = "Fireball", type = "skillshot", range = 48, speed = 95, width = 2.5, damage = 110, perLevel = 22, ratio = 0.8, mana = 45, cooldown = 5 },
@@ -57,7 +57,7 @@ Heroes.Defs = {
 		color = Color3.fromRGB(90, 180, 90),
 		hp = 510, hpPerLevel = 78, mana = 320, manaPerLevel = 30, manaRegen = 5,
 		damage = 52, damagePerLevel = 4.5, armor = 18, armorPerLevel = 2,
-		range = 30, attackCd = 0.85, speed = 17, ranged = true,
+		range = 45, attackCd = 0.85, speed = 17, ranged = true,
 		build = { "LongSword", "Boots", "WarBlade", "WarBlade", "ClothArmor", "Ruby" },
 		abilities = {
 			Q = { name = "Piercing Arrow", type = "skillshot", range = 60, speed = 130, width = 2, pierce = true, damage = 95, perLevel = 20, ratio = 0.5, mana = 45, cooldown = 7 },
@@ -98,6 +98,23 @@ Heroes.Defs = {
 			W = { name = "Smoke Veil", type = "buff", duration = 3, speedMult = 1.5, attackSpeed = 0.3, mana = 50, cooldown = 13 },
 			E = { name = "Poison Blade", type = "skillshot", range = 35, speed = 110, width = 2, damage = 80, perLevel = 16, ratio = 0.5, slow = 0.35, slowDuration = 2.5, mana = 40, cooldown = 8 },
 			R = { name = "Execute", type = "execute", range = 14, radius = 10, damage = 180, perLevel = 30, ratio = 0.7, missingHp = 0.35, mana = 90, cooldown = 50 },
+		},
+	},
+
+	Gunslinger = {
+		displayName = "Gunslinger",
+		role = "Gunner",
+		description = "Fast-firing sharpshooter with a frag grenade and a bullet-storm finisher.",
+		color = Color3.fromRGB(140, 92, 56),
+		hp = 500, hpPerLevel = 75, mana = 300, manaPerLevel = 30, manaRegen = 5,
+		damage = 30, damagePerLevel = 2.5, armor = 16, armorPerLevel = 2,
+		range = 48, attackCd = 0.45, speed = 17, ranged = true,
+		build = { "LongSword", "Boots", "WarBlade", "WarBlade", "Ruby", "ClothArmor" },
+		abilities = {
+			Q = { name = "Rapid Fire", type = "buff", duration = 3, attackSpeed = 0.8, speedMult = 1.1, mana = 40, cooldown = 10 },
+			W = { name = "Frag Grenade", type = "aoe", range = 35, radius = 9, delay = 0.8, damage = 110, perLevel = 22, ratio = 0.6, mana = 50, cooldown = 9 },
+			E = { name = "Combat Roll", type = "dash", range = 14, buff = { duration = 2, attackSpeed = 0.4 }, mana = 35, cooldown = 7 },
+			R = { name = "Bullet Storm", type = "skillshot", count = 9, spread = 40, range = 50, speed = 160, width = 1.6, damage = 70, perLevel = 12, ratio = 0.5, mana = 100, cooldown = 55 },
 		},
 	},
 }

@@ -6,7 +6,7 @@ Config.TeamColors = {
 	Blue = Color3.fromRGB(60, 140, 255),
 	Red = Color3.fromRGB(235, 70, 70),
 }
-Config.TeamSize = 5
+Config.TeamSize = 6
 Config.FillWithBots = true -- empty slots are filled with AI heroes
 
 Config.GroundY = 0 -- top surface of the battlefield

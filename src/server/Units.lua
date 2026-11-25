@@ -139,6 +139,14 @@ function Units.attach(u, model, root)
 	model:SetAttribute("UnitId", u.id)
 	model:SetAttribute("Radius", u.radius)
 	model:SetAttribute("UnitName", u.name)
+	-- Vertical extent relative to the root, used for first-person aiming.
+	local ok, cf, size = pcall(function()
+		return model:GetBoundingBox()
+	end)
+	if ok then
+		u.aimBottom = cf.Position.Y - size.Y / 2 - root.Position.Y
+		u.aimTop = cf.Position.Y + size.Y / 2 - root.Position.Y
+	end
 	buildBar(u)
 	Units.refresh(u)
 end
@@ -334,7 +342,8 @@ function Units.damage(target, amount, source)
 
 	if Units.net and ((source and source.kind == "hero") or target.kind == "hero") then
 		local heroVsHero = source ~= nil and source.kind == "hero" and target.kind == "hero"
-		Units.net.FX:FireAllClients("dmg", target.root.Position, math.floor(dealt + 0.5), heroVsHero)
+		local sourceUserId = source and source.player and source.player.UserId or 0
+		Units.net.FX:FireAllClients("dmg", target.root.Position, math.floor(dealt + 0.5), heroVsHero, sourceUserId)
 	end
 
 	if target.hp <= 0 then
@@ -404,6 +413,27 @@ function Units.face(u, pos)
 		u.ao.CFrame = CFrame.lookAt(Vector3.zero, d.Unit)
 		u.lastDir = d.Unit
 	end
+end
+
+-- First-person aiming: the enemy whose body the aim ray passes closest to (within `assist`
+-- studs of its edge), nearest along the ray. Returns the unit or nil.
+function Units.aimPick(u, origin, dir, range, assist)
+	local best, bestT = nil, math.huge
+	for o in pairs(Units.all) do
+		if o.team ~= u.team and Units.valid(o) and not Units.isInvulnerable(o) then
+			local rp = o.root.Position
+			local lo, hi = o.aimBottom or -1.5, o.aimTop or 2.5
+			for i = 0, 3 do
+				local p = rp + Vector3.new(0, lo + (hi - lo) * (i + 0.5) / 4, 0)
+				local v = p - origin
+				local t = v:Dot(dir)
+				if t > 0 and t <= range + o.radius and t < bestT and (v - dir * t).Magnitude <= o.radius + assist then
+					best, bestT = o, t
+				end
+			end
+		end
+	end
+	return best
 end
 
 function Units.canAttack(u)

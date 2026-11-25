@@ -17,6 +17,10 @@ local MapData = require(Shared:WaitForChild("MapData"))
 
 local HUD = {}
 
+-- Key shown (and pressed) for each ability slot. W walks forward in first person, so the second
+-- ability is on E and the third on F.
+HUD.KEY_LABELS = { Q = "Q", W = "E", E = "F", R = "R" }
+
 local remotes
 local gui
 local el = {} -- named UI elements
@@ -94,7 +98,7 @@ local TYPE_NAMES = {
 }
 
 local function describeAbility(slot, ab)
-	local lines = { string.format("[%s] %s  (%s)", slot, ab.name, TYPE_NAMES[ab.type] or ab.type) }
+	local lines = { string.format("[%s] %s  (%s)", HUD.KEY_LABELS[slot], ab.name, TYPE_NAMES[ab.type] or ab.type) }
 	if ab.damage then
 		table.insert(lines, string.format("Damage: %d (+%d per level, +%d%% Power)", ab.damage, ab.perLevel or 0, (ab.ratio or 0) * 100))
 	end
@@ -153,7 +157,7 @@ local function buildBottomPanel()
 			BackgroundColor3 = Color3.fromRGB(55, 60, 78),
 		}, { corner(8), make("UIStroke", { Color = Color3.fromRGB(110, 115, 140), Thickness = 1.5 }) })
 		local name = label({ Parent = box, Size = UDim2.new(1, -6, 0, 30), Position = UDim2.fromOffset(3, 18), TextSize = 11, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center })
-		local key = label({ Parent = box, Position = UDim2.fromOffset(5, 2), Size = UDim2.fromOffset(20, 16), Text = slot, TextColor3 = GOLD, TextSize = 14 })
+		local key = label({ Parent = box, Position = UDim2.fromOffset(5, 2), Size = UDim2.fromOffset(20, 16), Text = HUD.KEY_LABELS[slot], TextColor3 = GOLD, TextSize = 14 })
 		local cost = label({ Parent = box, Position = UDim2.new(0, 0, 1, -16), Size = UDim2.new(1, -5, 0, 14), TextSize = 10, TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = Color3.fromRGB(120, 180, 255) })
 		local overlay = make("Frame", {
 			Parent = box, AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.fromScale(1, 0),
@@ -245,7 +249,7 @@ local function buildTopBar()
 		Parent = gui, AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 10, 1, -10), Size = UDim2.fromOffset(300, 90),
 		TextSize = 12, Font = Enum.Font.Gotham, TextColor3 = Color3.fromRGB(230, 230, 230), TextStrokeTransparency = 0.5,
 		TextYAlignment = Enum.TextYAlignment.Bottom,
-		Text = "Right-click: move / attack (hold to steer)\nQ W E R: abilities at mouse\nS: stop · B: shop · Tab: scores\nMouse wheel: zoom · Space: reset zoom",
+		Text = "WASD: move · Space: jump\nLeft click: shoot / swing · Right click: zoom\nQ E F R: abilities at the crosshair\nB: shop · Tab: scores",
 	})
 end
 
@@ -255,6 +259,8 @@ local function buildShop()
 		Size = UDim2.fromOffset(560, 400), BackgroundColor3 = PANEL, Visible = false, ZIndex = 20,
 	}, { corner(10) })
 	el.shop = shop
+	-- A modal button frees the mouse from first-person lock while the shop is open.
+	make("TextButton", { Parent = shop, Modal = true, BackgroundTransparency = 1, Text = "", Size = UDim2.fromScale(1, 1), ZIndex = 20 })
 	label({ Parent = shop, Position = UDim2.fromOffset(16, 10), Size = UDim2.fromOffset(300, 28), Text = "Shop", TextSize = 22, ZIndex = 21 })
 	el.shopNote = label({ Parent = shop, Position = UDim2.fromOffset(16, 38), Size = UDim2.fromOffset(500, 18), TextSize = 12, Font = Enum.Font.Gotham, ZIndex = 21 })
 	local close = make("TextButton", {
@@ -287,15 +293,16 @@ end
 local function buildHeroSelect()
 	local frame = make("Frame", {
 		Parent = gui, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(800, 400), BackgroundColor3 = PANEL, Visible = false, ZIndex = 30,
+		Size = UDim2.fromOffset(950, 400), BackgroundColor3 = PANEL, Visible = false, ZIndex = 30,
 	}, { corner(12) })
 	el.heroSelect = frame
+	make("TextButton", { Parent = frame, Modal = true, BackgroundTransparency = 1, Text = "", Size = UDim2.fromScale(1, 1), ZIndex = 30 })
 	label({ Parent = frame, Position = UDim2.fromOffset(20, 12), Size = UDim2.fromOffset(400, 32), Text = "Choose your hero", TextSize = 26, ZIndex = 31 })
 	el.pickTimer = label({ Parent = frame, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -20, 0, 16), Size = UDim2.fromOffset(300, 24), TextXAlignment = Enum.TextXAlignment.Right, TextSize = 16, ZIndex = 31 })
 	for i, id in ipairs(HeroDefs.Order) do
 		local def = HeroDefs.Defs[id]
 		local card = make("TextButton", {
-			Parent = frame, Position = UDim2.fromOffset(20 + (i - 1) * 154, 60), Size = UDim2.fromOffset(144, 320),
+			Parent = frame, Position = UDim2.fromOffset(20 + (i - 1) * 152, 60), Size = UDim2.fromOffset(144, 320),
 			Text = "", BackgroundColor3 = Color3.fromRGB(48, 52, 66), ZIndex = 31,
 		}, { corner(10), make("UIStroke", { Color = def.color, Thickness = 2 }) })
 		make("Frame", { Parent = card, Position = UDim2.fromOffset(10, 10), Size = UDim2.new(1, -20, 0, 70), BackgroundColor3 = def.color, ZIndex = 32 }, { corner(8) })
@@ -347,6 +354,53 @@ local function buildMinimap()
 	}, { corner(8), make("UIStroke", { Color = Color3.fromRGB(20, 20, 20), Thickness = 2 }) })
 	el.minimap = frame
 	el.dots = {}
+end
+
+local pulse = 0
+local hitUntil = 0
+local function buildCrosshair()
+	local holder = make("Frame", {
+		Parent = gui, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(60, 60), BackgroundTransparency = 1,
+	})
+	el.crosshair = holder
+	el.crossBars = {}
+	for i, d in ipairs({ { 0, -1 }, { 0, 1 }, { -1, 0 }, { 1, 0 } }) do
+		local horizontal = d[2] == 0
+		local bar = make("Frame", {
+			Parent = holder, AnchorPoint = Vector2.new(0.5, 0.5), BorderSizePixel = 0, BackgroundColor3 = WHITE,
+			Size = horizontal and UDim2.fromOffset(9, 2) or UDim2.fromOffset(2, 9),
+		}, { make("UIStroke", { Color = Color3.new(0, 0, 0), Transparency = 0.4, Thickness = 1 }) })
+		el.crossBars[i] = { frame = bar, dir = d }
+	end
+	make("Frame", {
+		Parent = holder, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(3, 3), BorderSizePixel = 0, BackgroundColor3 = WHITE,
+	}, { corner(2) })
+	local hit = make("Frame", {
+		Parent = holder, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(22, 22), BackgroundTransparency = 1, Visible = false,
+	})
+	el.hitBars = {}
+	for i, rot in ipairs({ 45, -45 }) do
+		el.hitBars[i] = make("Frame", {
+			Parent = hit, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(22, 2), Rotation = rot, BorderSizePixel = 0, BackgroundColor3 = WHITE,
+		})
+	end
+	el.hitmarker = hit
+end
+
+local function updateCrosshair(dt)
+	pulse *= math.exp(-dt * 12)
+	local gap = 7 + pulse * 7
+	for _, b in ipairs(el.crossBars) do
+		b.frame.Position = UDim2.new(0.5, b.dir[1] * gap, 0.5, b.dir[2] * gap)
+	end
+	el.hitmarker.Visible = os.clock() < hitUntil
+	local char = player.Character
+	local alive = char and (char:GetAttribute("Health") or 0) > 0
+	el.crosshair.Visible = alive and player:GetAttribute("HeroId") ~= nil and not HUD.menuOpen()
 end
 
 ---------------------------------------------------------------------------
@@ -567,6 +621,8 @@ function HUD.init(ctx)
 	buildHeroSelect()
 	buildScoreboard()
 	buildMinimap()
+	buildCrosshair()
+	RunService.RenderStepped:Connect(updateCrosshair)
 
 	local accum = 0
 	RunService.RenderStepped:Connect(function(dt)
@@ -581,6 +637,23 @@ end
 function HUD.setCooldown(slot, duration)
 	cooldownEnd[slot] = os.clock() + duration
 	cooldownLen[slot] = duration
+end
+
+function HUD.menuOpen()
+	return el.shop ~= nil and (el.shop.Visible or el.heroSelect.Visible)
+end
+
+-- Crosshair kick when one of your attacks goes off.
+function HUD.attackPulse()
+	pulse = 1
+end
+
+-- Brief X on the crosshair when your damage lands (red on enemy heroes).
+function HUD.hitmarker(heroVsHero)
+	hitUntil = os.clock() + 0.15
+	for _, bar in ipairs(el.hitBars) do
+		bar.BackgroundColor3 = heroVsHero and Color3.fromRGB(255, 70, 60) or WHITE
+	end
 end
 
 function HUD.toggleShop()

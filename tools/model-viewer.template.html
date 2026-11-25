@@ -135,10 +135,11 @@
   const TEAM = { Blue: [60, 140, 255], Red: [235, 70, 70] };
   const HEROES = {
     Knight:   { color: [205, 205, 215], ranged: false, role: "Fighter",  hp: 620, range: 6,   desc: "Durable melee bruiser who charges in and locks down groups.", abil: "Cleave · Rally · Charge · Judgment" },
-    Mage:     { color: [150, 90, 230],  ranged: true,  role: "Mage",     hp: 470, range: 28,  desc: "Fragile long-range caster with huge burst damage.", abil: "Fireball · Frost Nova · Blink · Meteor" },
-    Ranger:   { color: [90, 180, 90],   ranged: true,  role: "Marksman", hp: 510, range: 30,  desc: "Sustained ranged damage. Kites with tumbles and slows.", abil: "Piercing Arrow · Volley · Tumble · Rain of Arrows" },
+    Mage:     { color: [150, 90, 230],  ranged: true,  role: "Mage",     hp: 470, range: 40,  desc: "Fragile long-range caster with huge burst damage.", abil: "Fireball · Frost Nova · Blink · Meteor" },
+    Ranger:   { color: [90, 180, 90],   ranged: true,  role: "Marksman", hp: 510, range: 45,  desc: "Sustained ranged damage. Kites with tumbles and slows.", abil: "Piercing Arrow · Volley · Tumble · Rain of Arrows" },
     Guardian: { color: [200, 160, 70],  ranged: false, role: "Tank",     hp: 720, range: 6,   desc: "Massive armored tank. Stuns, slows and soaks tower shots.", abil: "Shield Bash · Fortify · Ground Slam · Earthquake" },
     Assassin: { color: [60, 60, 70],    ranged: false, role: "Assassin", hp: 530, range: 5.5, desc: "Fast melee killer that dives and executes low-health heroes.", abil: "Shadow Strike · Smoke Veil · Poison Blade · Execute" },
+    Gunslinger: { color: [140, 92, 56], ranged: true,  role: "Gunner",   hp: 500, range: 48,  desc: "Fast-firing sharpshooter with a frag grenade and a bullet-storm finisher.", abil: "Rapid Fire · Frag Grenade · Combat Roll · Bullet Storm" },
   };
   const MINIONS = {
     melee:  { hp: 340, range: 3.5, desc: "Small armored soldier with a sword and round shield. Three spawn per lane every wave." },
@@ -172,7 +173,7 @@
       parts: specParts(name, team), rig: true, bar: { y: SPECS[name].barTop, w: 100, h: 9, name: `Bot ${id}  Lv1`, team },
       title: id, kind: "Hero · R6 rig",
       meta: [["Role", h.role], ["Attack", h.ranged ? `Ranged, ${h.range} studs` : `Melee, ${h.range} studs`], ["Base HP", h.hp], ["Parts", partCount(name)]],
-      text: `${h.desc} Abilities: ${h.abil}. A real R6 rig: HumanoidRootPart, Torso, Head, two arms and two legs at standard R6 sizes, joined by Motor6Ds (RootJoint, Neck, shoulders, hips), with every piece of gear welded to its limb. Bots play Roblox's R6 idle, walk and slash animations. Players on R6 avatars wear this same gear over their own avatar.`,
+      text: `${h.desc} Abilities: ${h.abil}. A real R6 rig: invisible standard-size R6 body parts joined by Motor6Ds (RootJoint, Neck, shoulders, hips) carry a rounded visible body (capsule arms and legs, a rounded torso) and gear, each welded to its limb. Bots play Roblox's R6 idle, walk and slash animations. Players on R6 avatars wear this same gear over their own avatar.`,
       src: `tools/gen_models.py · ${id.toLowerCase()}()  →  ModelSpecs.json "${name}"`,
     };
   }

@@ -6,6 +6,8 @@
 	  TeamColor = "team" | "teamDark" | "teamLight"   recolored to the team's color in game
 	  Attach    = "Torso" | "Head" | "Left Arm" | ...  R6 limb a hero's gear part follows
 	              (parts without it follow the nearest limb)
+	  BodySkin  = true                                 part of a bot hero's visible body; skipped
+	              when the hero's gear is put on a player (who keeps their own avatar)
 	Model attributes:
 	  MobaModel = spec name, e.g. "Hero_Knight". Marks a model made with the kit; its pivot
 	              (WorldPivot) is the ground point under the model's center.
@@ -88,6 +90,9 @@ function ModelBuilder.makePart(p, team, cframe, scale)
 	end
 	if p.attach then
 		part:SetAttribute("Attach", p.attach)
+	end
+	if p.skin then
+		part:SetAttribute("BodySkin", true)
 	end
 	return part
 end

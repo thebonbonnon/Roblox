@@ -55,7 +55,7 @@ end
 ---------------------------------------------------------------------------
 -- Team slots
 ---------------------------------------------------------------------------
-local BOT_LANES = { "Top", "Mid", "Bot", "Bot", "Top" }
+local BOT_LANES = { "Top", "Mid", "Bot", "Bot", "Top", "Mid" }
 local slots = { Blue = {}, Red = {} } -- arrays of hero units
 local playerTeam = {} -- [player] = team name
 local playerHero = {} -- [player] = heroId
@@ -303,6 +303,33 @@ Net.SetTarget.OnServerEvent:Connect(function(player, model)
 	else
 		u.target = nil
 	end
+end)
+
+-- First-person basic attack: shoot (or swing) along the crosshair.
+Net.Fire.OnServerEvent:Connect(function(player, dir)
+	local u = HeroService.byPlayer[player]
+	if not u or typeof(dir) ~= "Vector3" or dir.Magnitude < 0.5 or dir.Magnitude ~= dir.Magnitude then
+		return
+	end
+	if not Units.valid(u) or not Units.canAttack(u) then
+		return
+	end
+	dir = dir.Unit
+	local head = u.model:FindFirstChild("Head")
+	local origin = head and head.Position or (u.root.Position + Vector3.new(0, 1.5, 0))
+	local reach = u.range + (u.ranged and 4 or 2.5)
+	local target = Units.aimPick(u, origin, dir, reach, u.ranged and 1.2 or 2.5)
+	if target then
+		Units.basicAttack(u, target)
+	else
+		u.lastAttack = Units.now()
+		if u.ranged then
+			Effects.trail(origin + dir * 2, origin + dir * reach, Config.TeamColors[u.team])
+		else
+			Effects.flash(origin + dir * 3, 1.2, Color3.new(1, 1, 1), 0.15)
+		end
+	end
+	Net.Cooldown:FireClient(player, "Attack", Units.getAttackCd(u))
 end)
 
 Net.CastAbility.OnServerEvent:Connect(function(player, slot, pos)

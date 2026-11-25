@@ -5,12 +5,13 @@ local Net = {}
 
 local EVENTS = {
 	-- client -> server
-	"SetTarget", -- (model?) right-clicked enemy to auto-attack, or nil to clear
+	"SetTarget", -- (model?) enemy to auto-attack, or nil to clear (unused in FPS mode)
+	"Fire", -- (Vector3 aim direction) basic attack along the crosshair
 	"CastAbility", -- (slot, Vector3 mouse ground position)
 	"BuyItem", -- (itemId)
 	"PickHero", -- (heroId)
 	-- server -> client
-	"Cooldown", -- (slot, duration)
+	"Cooldown", -- (slot, duration); slot "Attack" confirms a basic attack
 	"Notify", -- (kind, ...) kill feed, victory, messages
 	"FX", -- (kind, ...) cosmetic effects such as damage numbers
 }

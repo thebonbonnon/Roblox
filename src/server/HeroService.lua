@@ -182,10 +182,11 @@ function HeroService.spawn(u)
 		hum.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
 		hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 		hum.UseJumpPower = true
-		hum.JumpPower = 0
+		hum.JumpPower = 45
 		hum.WalkSpeed = u.def.speed
 		char:SetAttribute("HeroId", u.heroId)
 		Units.attach(u, char, hrp)
+		u.firePart = char:FindFirstChild("Head") -- first person: shots come from the eyes
 		u.alive = true
 		-- R6 players wear their hero's gear and get attack animations (the Animate script that
 		-- comes with the character already handles walking and idling).
