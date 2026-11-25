@@ -238,11 +238,11 @@ function Bots.create(team, heroId, lane)
 	u.lane = lane
 	u.path = MapData.GetLanePath(lane, team)
 	u.wp = 2
-	u.kinematic = true
 	u.moveDir = Vector3.zero
 	u.customSpawn = function(self, pos)
 		local model, root, info = buildModel(self, pos)
 		Units.attach(self, model, root)
+		Units.makeKinematic(self)
 		self.anim = Animations.attach(info.humanoid)
 		self.wp = 2
 		self.retreating = false
@@ -277,8 +277,8 @@ function Bots.step(dt)
 					local moving = u.moveDir and u.moveDir.Magnitude > 0.01
 					u.anim.setMoving(moving and Units.getSpeed(u) or 0)
 				end
+				Units.stepMove(u)
 			end
-			Units.stepMove(u, dt)
 		end
 	end
 end

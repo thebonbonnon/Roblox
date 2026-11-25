@@ -1,0 +1,2973 @@
+<roblox version="4"><Item class="Script" referent="RBX4"><Properties><string name="Name">MobaModelKit</string><ProtectedString name="Source"><![CDATA[--[[
+	MOBA Model Kit: a Roblox Studio plugin for editing the game's models visually.
+
+	1. Pick a model: an editable copy appears in Workspace (folder "MobaModelKit").
+	2. Edit it like any Studio model: move, resize, recolor, add parts or MeshParts
+	   (Meshy imports, Creator Store pieces...). Mark parts as "team color" so they turn
+	   blue or red in game.
+	3. Save: the model goes into ServerStorage.Models, and the game uses it from then on.
+	   Heroes stay animated R6 rigs: keep the body part names (Torso, Head, Left Arm, ...)
+	   and every other part follows the limb it's closest to.
+]]
+local ChangeHistoryService = game:GetService("ChangeHistoryService")
+local Selection = game:GetService("Selection")
+local ServerStorage = game:GetService("ServerStorage")
+
+local ModelBuilder = require(script.ModelBuilder)
+local Specs = ModelBuilder.Specs
+
+local MODELS = {
+	{ "Hero_Knight", "Knight" },
+	{ "Hero_Mage", "Mage" },
+	{ "Hero_Ranger", "Ranger" },
+	{ "Hero_Guardian", "Guardian" },
+	{ "Hero_Assassin", "Assassin" },
+	{ "Minion_melee", "Melee minion" },
+	{ "Minion_caster", "Caster minion" },
+	{ "Minion_siege", "Siege minion" },
+	{ "Tower", "Tower" },
+	{ "Nexus", "Nexus" },
+	{ "Tree", "Tree" },
+}
+
+local previewTeam = "Blue"
+
+---------------------------------------------------------------------------
+-- Model helpers
+---------------------------------------------------------------------------
+local function kitFolder()
+	local f = workspace:FindFirstChild("MobaModelKit")
+	if not f then
+		f = Instance.new("Folder")
+		f.Name = "MobaModelKit"
+		f.Parent = workspace
+	end
+	return f
+end
+
+local function modelsFolder()
+	local f = ServerStorage:FindFirstChild("Models")
+	if not f then
+		f = Instance.new("Folder")
+		f.Name = "Models"
+		f.Parent = ServerStorage
+	end
+	return f
+end
+
+local function savedVersions(name)
+	local f = ServerStorage:FindFirstChild("Models")
+	local found = {}
+	if f then
+		for _, suffix in ipairs({ "", "_Blue", "_Red" }) do
+			local m = f:FindFirstChild(name .. suffix)
+			if m then
+				table.insert(found, m)
+			end
+		end
+	end
+	return found
+end
+
+-- The kit model the user is working on: the selection's MobaModel ancestor, or the only one.
+local function currentKitModel()
+	for _, inst in ipairs(Selection:Get()) do
+		local node = inst
+		while node and node ~= game do
+			if node:IsA("Model") and node:GetAttribute("MobaModel") then
+				return node
+			end
+			node = node.Parent
+		end
+	end
+	local folder = workspace:FindFirstChild("MobaModelKit")
+	if folder then
+		local kits = {}
+		for _, m in ipairs(folder:GetChildren()) do
+			if m:IsA("Model") and m:GetAttribute("MobaModel") then
+				table.insert(kits, m)
+			end
+		end
+		if #kits == 1 then
+			return kits[1]
+		end
+	end
+	return nil
+end
+
+local function anchorAll(model)
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") then
+			d.Anchored = true
+		end
+	end
+end
+
+local function placementPoint()
+	local cam = workspace.CurrentCamera
+	local focus = cam and cam.Focus.Position or Vector3.zero
+	local count = #kitFolder():GetChildren()
+	return CFrame.new(focus.X + count * 25, 0, focus.Z)
+end
+
+local function frameCamera(model)
+	local cam = workspace.CurrentCamera
+	if not cam then
+		return
+	end
+	local pivot = model:GetPivot().Position
+	local _, size = model:GetBoundingBox()
+	local r = math.max(size.X, size.Y, size.Z)
+	local center = pivot + Vector3.new(0, size.Y / 2, 0)
+	-- Models face -Z, so look at the front.
+	cam.CFrame = CFrame.lookAt(center + Vector3.new(r * 0.9, r * 0.6, -r * 1.4), center)
+	cam.Focus = CFrame.new(center)
+end
+
+---------------------------------------------------------------------------
+-- Actions
+---------------------------------------------------------------------------
+local setStatus -- defined with the UI
+
+local function editModel(name)
+	local base = placementPoint()
+	local model
+	local saved = savedVersions(name)
+	if #saved > 0 then
+		model = saved[1]:Clone()
+		model:SetAttribute("MobaModel", name)
+		model:PivotTo(base)
+		ModelBuilder.recolor(model, previewTeam)
+		setStatus(("Editing your saved %s (%s)."):format(name, saved[1].Name))
+	else
+		model = ModelBuilder.buildParts(name, previewTeam, base, 1)
+		setStatus(("Editing the built-in %s. Change anything, then press Save."):format(name))
+	end
+	anchorAll(model)
+	model.Name = name
+	model.Parent = kitFolder()
+	Selection:Set({ model })
+	frameCamera(model)
+	ChangeHistoryService:SetWaypoint("MOBA Model Kit: edit " .. name)
+end
+
+local function markTeam(value)
+	local count = 0
+	for _, inst in ipairs(Selection:Get()) do
+		local list = inst:IsA("BasePart") and { inst } or inst:GetDescendants()
+		for _, part in ipairs(list) do
+			if part:IsA("BasePart") then
+				part:SetAttribute("TeamColor", value)
+				if value then
+					part.Color = ModelBuilder.resolveColor(value, previewTeam)
+				end
+				count += 1
+			end
+		end
+	end
+	if count == 0 then
+		setStatus("Select one or more parts first.", true)
+		return
+	end
+	ChangeHistoryService:SetWaypoint("MOBA Model Kit: team color")
+	setStatus(value and ("%d part(s) will now use the team color."):format(count)
+		or ("%d part(s) keep their own color now."):format(count))
+end
+
+local function preview(team)
+	previewTeam = team
+	local folder = workspace:FindFirstChild("MobaModelKit")
+	if folder then
+		for _, m in ipairs(folder:GetChildren()) do
+			ModelBuilder.recolor(m, team)
+		end
+	end
+	setStatus("Previewing " .. team .. " team colors.")
+end
+
+local function checkModel(model, spec)
+	local parts, names = {}, {}
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") then
+			table.insert(parts, d)
+			names[d.Name] = true
+		end
+	end
+	if not names[spec.root] then
+		return false, ("The model needs a part named \"%s\" (its root). Undo or rename a part to fix it."):format(spec.root)
+	end
+	local notes = {}
+	if spec.rig == "R6" then
+		local missing = {}
+		for _, n in ipairs(ModelBuilder.R6_BODY) do
+			if not names[n] then
+				table.insert(missing, n)
+			end
+		end
+		if #missing > 0 then
+			table.insert(notes, "Missing body parts (" .. table.concat(missing, ", ") .. "), so it won't animate.")
+		end
+	end
+	local scripts = 0
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("LuaSourceContainer") then
+			scripts += 1
+		end
+	end
+	if scripts > 0 then
+		table.insert(notes, ("Removed %d script(s) from the saved copy."):format(scripts))
+	end
+	return true, table.concat(notes, " ")
+end
+
+local function save(team)
+	local model = currentKitModel()
+	if not model then
+		setStatus("Select the model you're editing first (anything inside it works).", true)
+		return
+	end
+	local name = model:GetAttribute("MobaModel")
+	local spec = Specs[name]
+	local ok, note = checkModel(model, spec)
+	if not ok then
+		setStatus(note, true)
+		return
+	end
+	local savedName = team and (name .. "_" .. team) or name
+	local copy = model:Clone()
+	for _, d in ipairs(copy:GetDescendants()) do
+		if d:IsA("LuaSourceContainer") then
+			d:Destroy()
+		end
+	end
+	anchorAll(copy)
+	copy.Name = savedName
+	copy:SetAttribute("MobaModel", name)
+	local old = modelsFolder():FindFirstChild(savedName)
+	if old then
+		old:Destroy()
+	end
+	copy.Parent = modelsFolder()
+	ChangeHistoryService:SetWaypoint("MOBA Model Kit: save " .. savedName)
+
+	local msg = ("Saved as ServerStorage > Models > %s. Press Play to see it in game."):format(savedName)
+	if not team then
+		local overrides = {}
+		for _, t in ipairs({ "Blue", "Red" }) do
+			if modelsFolder():FindFirstChild(name .. "_" .. t) then
+				table.insert(overrides, name .. "_" .. t)
+			end
+		end
+		if #overrides > 0 then
+			msg ..= (" Note: %s still overrides it for that team."):format(table.concat(overrides, " and "))
+		end
+	end
+	setStatus(msg .. (note ~= "" and (" " .. note) or ""))
+end
+
+local function removeSaved()
+	local model = currentKitModel()
+	if not model then
+		setStatus("Select the model whose saved versions you want to remove.", true)
+		return
+	end
+	local name = model:GetAttribute("MobaModel")
+	local saved = savedVersions(name)
+	if #saved == 0 then
+		setStatus(name .. " has no saved versions; the game uses the built-in one.")
+		return
+	end
+	for _, m in ipairs(saved) do
+		m:Destroy()
+	end
+	ChangeHistoryService:SetWaypoint("MOBA Model Kit: remove " .. name)
+	setStatus(("Removed %d saved version(s) of %s. The game uses the built-in model again (Undo brings them back)."):format(#saved, name))
+end
+
+---------------------------------------------------------------------------
+-- UI
+---------------------------------------------------------------------------
+local toolbar = plugin:CreateToolbar("MOBA Model Kit")
+local toggleButton = toolbar:CreateButton("MobaModelKit", "Edit the MOBA's models", "rbxasset://textures/StudioToolbox/AssetPreview/Model.png", "Model Kit")
+toggleButton.ClickableWhenViewportHidden = true
+
+local widget = plugin:CreateDockWidgetPluginGui(
+	"MobaModelKit",
+	DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 320, 600, 260, 320)
+)
+widget.Title = "MOBA Model Kit"
+widget.Name = "MobaModelKit"
+toggleButton.Click:Connect(function()
+	widget.Enabled = not widget.Enabled
+end)
+
+local themed = {}
+local function theme(inst, bg, fg)
+	table.insert(themed, { inst = inst, bg = bg, fg = fg })
+	return inst
+end
+local function applyTheme()
+	local t = settings().Studio.Theme
+	for _, e in ipairs(themed) do
+		if e.bg then
+			e.inst.BackgroundColor3 = t:GetColor(Enum.StudioStyleGuideColor[e.bg])
+		end
+		if e.fg then
+			e.inst.TextColor3 = t:GetColor(Enum.StudioStyleGuideColor[e.fg])
+		end
+	end
+end
+
+local scroll = theme(Instance.new("ScrollingFrame"), "MainBackground")
+scroll.Size = UDim2.fromScale(1, 1)
+scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 6
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.CanvasSize = UDim2.new()
+scroll.Parent = widget
+local list = Instance.new("UIListLayout")
+list.Padding = UDim.new(0, 8)
+list.SortOrder = Enum.SortOrder.LayoutOrder
+list.Parent = scroll
+local pad = Instance.new("UIPadding")
+for _, side in ipairs({ "PaddingLeft", "PaddingRight", "PaddingTop", "PaddingBottom" }) do
+	pad[side] = UDim.new(0, 10)
+end
+pad.Parent = scroll
+
+local order = 0
+local function add(inst)
+	order += 1
+	inst.LayoutOrder = order
+	inst.Parent = scroll
+	return inst
+end
+
+local function label(text, dim, size, bold)
+	local l = theme(Instance.new("TextLabel"), nil, dim and "DimmedText" or "MainText")
+	l.BackgroundTransparency = 1
+	l.Size = UDim2.new(1, 0, 0, 0)
+	l.AutomaticSize = Enum.AutomaticSize.Y
+	l.TextWrapped = true
+	l.TextXAlignment = Enum.TextXAlignment.Left
+	l.Font = bold and Enum.Font.SourceSansBold or Enum.Font.SourceSans
+	l.TextSize = size or 15
+	l.Text = text
+	return l
+end
+
+local function button(text, primary, height)
+	local b = theme(Instance.new("TextButton"), primary and "DialogMainButton" or "Button", primary and "DialogMainButtonText" or "ButtonText")
+	b.Size = UDim2.new(1, 0, 0, height or 28)
+	b.Text = text
+	b.Font = Enum.Font.SourceSans
+	b.TextSize = 15
+	b.AutoButtonColor = true
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 4)
+	c.Parent = b
+	return b
+end
+
+local function row(buttons)
+	local f = Instance.new("Frame")
+	f.BackgroundTransparency = 1
+	f.Size = UDim2.new(1, 0, 0, 28)
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.Padding = UDim.new(0, 6)
+	layout.Parent = f
+	for i, b in ipairs(buttons) do
+		b.LayoutOrder = i
+		b.Size = UDim2.new(1 / #buttons, -6 * (#buttons - 1) / #buttons, 1, 0)
+		b.Parent = f
+	end
+	return f
+end
+
+-- 1. Pick
+add(label("1. Pick a model to edit", false, 17, true))
+add(label("An editable copy appears in Workspace > MobaModelKit. Models marked (saved) have a version the game is using.", true, 14))
+local grid = Instance.new("Frame")
+grid.BackgroundTransparency = 1
+grid.Size = UDim2.new(1, 0, 0, 0)
+grid.AutomaticSize = Enum.AutomaticSize.Y
+local gridLayout = Instance.new("UIGridLayout")
+gridLayout.CellSize = UDim2.new(0.5, -3, 0, 28)
+gridLayout.CellPadding = UDim2.fromOffset(6, 6)
+gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+gridLayout.Parent = grid
+add(grid)
+local modelButtons = {}
+for i, entry in ipairs(MODELS) do
+	local b = button(entry[2])
+	b.LayoutOrder = i
+	b.Parent = grid
+	b.MouseButton1Click:Connect(function()
+		editModel(entry[1])
+	end)
+	modelButtons[entry[1]] = { button = b, label = entry[2] }
+end
+
+-- 2. Edit
+add(label("2. Edit it", false, 17, true))
+add(label("Move, resize and recolor parts, or drop in MeshParts (Meshy, Creator Store). Keep the model's root part. For heroes, keep the body part names (Torso, Head, Left Arm...): every other part follows the nearest limb, so armor and weapons animate.", true, 14))
+local markBtn, unmarkBtn = button("Use team color"), button("Keep own color")
+add(row({ markBtn, unmarkBtn }))
+markBtn.MouseButton1Click:Connect(function()
+	markTeam("team")
+end)
+unmarkBtn.MouseButton1Click:Connect(function()
+	markTeam(nil)
+end)
+add(label("Applies to the selected parts. Team-colored parts turn blue or red in game (plain parts and untextured meshes).", true, 13))
+local blueBtn, redBtn = button("Preview Blue"), button("Preview Red")
+add(row({ blueBtn, redBtn }))
+blueBtn.MouseButton1Click:Connect(function()
+	preview("Blue")
+end)
+redBtn.MouseButton1Click:Connect(function()
+	preview("Red")
+end)
+
+-- 3. Save
+add(label("3. Save it to the game", false, 17, true))
+local saveBtn = add(button("Save for both teams", true, 32))
+saveBtn.MouseButton1Click:Connect(function()
+	save(nil)
+end)
+local saveBlue, saveRed = button("Save Blue only"), button("Save Red only")
+add(row({ saveBlue, saveRed }))
+saveBlue.MouseButton1Click:Connect(function()
+	save("Blue")
+end)
+saveRed.MouseButton1Click:Connect(function()
+	save("Red")
+end)
+add(label("Use the team-only saves for meshes with blue or red painted into their texture.", true, 13))
+local removeBtn = add(button("Go back to the built-in model"))
+local confirmUntil = 0
+removeBtn.MouseButton1Click:Connect(function()
+	if os.clock() < confirmUntil then
+		confirmUntil = 0
+		removeBtn.Text = "Go back to the built-in model"
+		removeSaved()
+	else
+		confirmUntil = os.clock() + 3
+		removeBtn.Text = "Click again to delete the saved versions"
+		task.delay(3, function()
+			if os.clock() >= confirmUntil then
+				removeBtn.Text = "Go back to the built-in model"
+			end
+		end)
+	end
+end)
+
+-- Status
+local status = add(label("Pick a model to start.", true, 14))
+local function refreshList()
+	for name, e in pairs(modelButtons) do
+		e.button.Text = e.label .. (#savedVersions(name) > 0 and "  (saved)" or "")
+	end
+end
+function setStatus(text, isError)
+	status.Text = text
+	status.TextColor3 = isError and Color3.fromRGB(230, 90, 80)
+		or settings().Studio.Theme:GetColor(Enum.StudioStyleGuideColor.DimmedText)
+	refreshList()
+end
+
+applyTheme()
+refreshList()
+settings().Studio.ThemeChanged:Connect(applyTheme)
+widget:GetPropertyChangedSignal("Enabled"):Connect(function()
+	toggleButton:SetActive(widget.Enabled)
+	if widget.Enabled then
+		refreshList()
+	end
+end)
+]]></ProtectedString></Properties><Item class="ModuleScript" referent="RBX1"><Properties><string name="Name">Config</string><ProtectedString name="Source"><![CDATA[-- Global tuning values for the MOBA. Shared by server and client.
+local Config = {}
+
+Config.TeamNames = { "Blue", "Red" }
+Config.TeamColors = {
+	Blue = Color3.fromRGB(60, 140, 255),
+	Red = Color3.fromRGB(235, 70, 70),
+}
+Config.TeamSize = 5
+Config.FillWithBots = true -- empty slots are filled with AI heroes
+
+Config.GroundY = 0 -- top surface of the battlefield
+Config.MapHalfSize = 300
+
+-- Match flow
+Config.HeroSelectTime = 20 -- seconds before a random hero is auto-picked
+Config.RestartDelay = 15 -- seconds after a nexus falls before a new match
+
+-- Economy / progression
+Config.StartingGold = 500
+Config.PassiveGold = 2 -- gold per second
+Config.MaxItems = 6
+Config.MaxLevel = 15
+Config.UltLevel = 6 -- R unlocks at this level
+function Config.XpForLevel(level)
+	return 120 + level * 70
+end
+Config.XpShareRadius = 45
+Config.HeroKillGold = 300
+Config.HeroKillGoldPerLevel = 15
+Config.AssistGold = 120
+Config.HeroKillXp = 160
+Config.HeroKillXpPerLevel = 25
+Config.TowerGold = 150 -- given to every hero on the destroying team
+Config.AssistWindow = 10
+
+-- Respawn
+Config.RespawnBase = 6
+Config.RespawnPerLevel = 1.5
+
+-- Fountain
+Config.FountainRadius = 26
+Config.FountainRegen = 0.12 -- fraction of max hp/mana per second
+Config.FountainLaserDps = 500 -- damage per second to enemy heroes in your fountain
+Config.ShopRadius = 32
+
+-- Minion waves
+Config.FirstWaveDelay = 8
+Config.WaveInterval = 30
+Config.SiegeEvery = 3
+Config.MinionAggro = 16
+Config.MinionLeash = 26
+Config.Minions = {
+	melee = {
+		hp = 340, damage = 22, armor = 10, range = 3.5, attackCd = 1.2, speed = 13,
+		ranged = false, radius = 1.4,
+		gold = 20, xp = 30,
+	},
+	caster = {
+		hp = 230, damage = 30, armor = 0, range = 18, attackCd = 1.5, speed = 13,
+		ranged = true, radius = 1.2,
+		gold = 16, xp = 26,
+	},
+	siege = {
+		hp = 750, damage = 50, armor = 20, range = 22, attackCd = 2.0, speed = 11,
+		ranged = true, radius = 2.2,
+		gold = 45, xp = 60,
+	},
+}
+
+-- Structures
+Config.Tower = { hp = 3000, damage = 150, armor = 40, range = 24, attackCd = 1.1, radius = 4 }
+Config.Nexus = { hp = 5500, armor = 30, radius = 8 }
+
+return Config
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX2"><Properties><string name="Name">ModelSpecs</string><ProtectedString name="Source"><![CDATA[-- Generated from src/shared/ModelSpecs.json by tools/build_plugin.py
+return {
+	Hero_Knight = {
+		root = "HumanoidRootPart",
+		barTop = 7.3,
+		height = 6.38,
+		parts = {{
+			name = "HumanoidRootPart",
+			shape = "box",
+			size = {2, 2, 1},
+			pos = {0, 3, 0},
+			color = {163, 162, 165},
+			material = "SmoothPlastic",
+			alpha = 1,
+		}, {
+			name = "Torso",
+			shape = "box",
+			size = {2, 2, 1},
+			pos = {0, 3, 0},
+			color = {170, 176, 188},
+			material = "Metal",
+		}, {
+			name = "Head",
+			shape = "head",
+			size = {2, 1, 1},
+			pos = {0, 4.5, 0},
+			color = {234, 196, 160},
+			material = "SmoothPlastic",
+		}, {
+			name = "Left Arm",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {-1.5, 3, 0},
+			color = {170, 176, 188},
+			material = "Metal",
+		}, {
+			name = "Right Arm",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {1.5, 3, 0},
+			color = {170, 176, 188},
+			material = "Metal",
+		}, {
+			name = "Left Leg",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {-0.5, 1, 0},
+			color = {170, 176, 188},
+			material = "Metal",
+		}, {
+			name = "Right Leg",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {0.5, 1, 0},
+			color = {170, 176, 188},
+			material = "Metal",
+		}, {
+			name = "BootL",
+			shape = "box",
+			size = {1.06, 0.55, 1.16},
+			pos = {-0.5, 0.28, -0.04},
+			color = {88, 92, 104},
+			material = "Metal",
+			attach = "Left Leg",
+		}, {
+			name = "KneeL",
+			shape = "box",
+			size = {0.6, 0.4, 0.12},
+			pos = {-0.5, 1.25, -0.53},
+			color = {88, 92, 104},
+			material = "Metal",
+			attach = "Left Leg",
+		}, {
+			name = "BootR",
+			shape = "box",
+			size = {1.06, 0.55, 1.16},
+			pos = {0.5, 0.28, -0.04},
+			color = {88, 92, 104},
+			material = "Metal",
+			attach = "Right Leg",
+		}, {
+			name = "KneeR",
+			shape = "box",
+			size = {0.6, 0.4, 0.12},
+			pos = {0.5, 1.25, -0.53},
+			color = {88, 92, 104},
+			material = "Metal",
+			attach = "Right Leg",
+		}, {
+			name = "Tabard",
+			shape = "box",
+			size = {1.5, 1.95, 0.08},
+			pos = {0, 2.95, -0.54},
+			color = "team",
+			material = "Fabric",
+			attach = "Torso",
+		}, {
+			name = "TabardCross",
+			shape = "box",
+			size = {0.3, 1.2, 0.04},
+			pos = {0, 3.15, -0.6},
+			color = {236, 236, 236},
+			material = "Fabric",
+			attach = "Torso",
+		}, {
+			name = "TabardCrossBar",
+			shape = "box",
+			size = {0.9, 0.3, 0.04},
+			pos = {0, 3.35, -0.6},
+			color = {236, 236, 236},
+			material = "Fabric",
+			attach = "Torso",
+		}, {
+			name = "Belt",
+			shape = "box",
+			size = {2.06, 0.3, 1.06},
+			pos = {0, 2.15, 0},
+			color = {112, 74, 42},
+			material = "Fabric",
+			attach = "Torso",
+		}, {
+			name = "Buckle",
+			shape = "box",
+			size = {0.35, 0.3, 0.08},
+			pos = {0, 2.15, -0.57},
+			color = {232, 188, 74},
+			material = "Metal",
+			attach = "Torso",
+		}, {
+			name = "PauldronL",
+			shape = "box",
+			size = {1.4, 0.55, 1.4},
+			pos = {-1.56, 4.05, 0},
+			color = {170, 176, 188},
+			material = "Metal",
+			attach = "Left Arm",
+		}, {
+			name = "PauldronTrimL",
+			shape = "box",
+			size = {1.46, 0.16, 1.46},
+			pos = {-1.56, 3.75, 0},
+			color = "team",
+			material = "Metal",
+			attach = "Left Arm",
+		}, {
+			name = "GauntletL",
+			shape = "box",
+			size = {1.08, 0.6, 1.08},
+			pos = {-1.5, 2.25, 0},
+			color = {88, 92, 104},
+			material = "Metal",
+			attach = "Left Arm",
+		}, {
+			name = "PauldronR",
+			shape = "box",
+			size = {1.4, 0.55, 1.4},
+			pos = {1.56, 4.05, 0},
+			color = {170, 176, 188},
+			material = "Metal",
+			attach = "Right Arm",
+		}, {
+			name = "PauldronTrimR",
+			shape = "box",
+			size = {1.46, 0.16, 1.46},
+			pos = {1.56, 3.75, 0},
+			color = "team",
+			material = "Metal",
+			attach = "Right Arm",
+		}, {
+			name = "GauntletR",
+			shape = "box",
+			size = {1.08, 0.6, 1.08},
+			pos = {1.5, 2.25, 0},
+			color = {88, 92, 104},
+			material = "Metal",
+			attach = "Right Arm",
+		}, {
+			name = "Helmet",
+			shape = "cyl",
+			size = {1.4, 1.48},
+			pos = {0, 4.58, 0},
+			color = {170, 176, 188},
+			material = "Metal",
+			attach = "Head",
+		}, {
+			name = "HelmetDome",
+			shape = "ball",
+			size = {1.48},
+			pos = {0, 5.2, 0},
+			color = {170, 176, 188},
+			material = "Metal",
+			attach = "Head",
+		}, {
+			name = "Visor",
+			shape = "box",
+			size = {1, 0.14, 0.08},
+			pos = {0, 4.62, -0.74},
+			color = {22, 22, 26},
+			material = "SmoothPlastic",
+			attach = "Head",
+		}, {
+			name = "VisorRidge",
+			shape = "box",
+			size = {0.14, 0.9, 0.1},
+			pos = {0, 4.45, -0.74},
+			color = {88, 92, 104},
+			material = "Metal",
+			attach = "Head",
+		}, {
+			name = "Plume",
+			shape = "box",
+			size = {0.22, 0.75, 1.3},
+			pos = {0, 6, 0.1},
+			color = "team",
+			material = "Fabric",
+			attach = "Head",
+		}, {
+			name = "SwordGrip",
+			shape = "box",
+			size = {0.24, 0.24, 0.8},
+			pos = {1.5, 2, -0.45},
+			color = {70, 46, 28},
+			material = "SmoothPlastic",
+			attach = "Right Arm",
+		}, {
+			name = "SwordPommel",
+			shape = "ball",
+			size = {0.36},
+			pos = {1.5, 2, -0.02},
+			color = {232, 188, 74},
+			material = "Metal",
+			attach = "Right Arm",
+		}, {
+			name = "SwordGuard",
+			shape = "box",
+			size = {0.95, 0.2, 0.22},
+			pos = {1.5, 2, -0.92},
+			color = {232, 188, 74},
+			material = "Metal",
+			attach = "Right Arm",
+		}, {
+			name = "SwordBlade",
+			shape = "box",
+			size = {0.32, 0.1, 3.2},
+			pos = {1.5, 2, -2.6},
+			color = {222, 228, 238},
+			material = "Metal",
+			attach = "Right Arm",
+		}, {
+			name = "SwordTip",
+			shape = "wedge",
+			size = {0.1, 0.32, 0.45},
+			pos = {1.5, 2, -4.42},
+			color = {222, 228, 238},
+			material = "Metal",
+			rot = {0, 0, 90},
+			attach = "Right Arm",
+		}, {
+			name = "Shield",
+			shape = "box",
+			size = {0.25, 2.2, 1.7},
+			pos = {-2.15, 3.1, -0.1},
+			color = "team",
+			material = "Metal",
+			attach = "Left Arm",
+		}, {
+			name = "ShieldPointA",
+			shape = "wedge",
+			size = {0.25, 0.8, 0.85},
+			pos = {-2.15, 1.6, -0.525},
+			color = "team",
+			material = "Metal",
+			rot = {0, 0, 180},
+			attach = "Left Arm",
+		}, {
+			name = "ShieldPointB",
+			shape = "wedge",
+			size = {0.25, 0.8, 0.85},
+			pos = {-2.15, 1.6, 0.325},
+			color = "team",
+			material = "Metal",
+			rot = {180, 0, 0},
+			attach = "Left Arm",
+		}, {
+			name = "ShieldRim",
+			shape = "box",
+			size = {0.28, 0.16, 1.78},
+			pos = {-2.15, 4.18, -0.1},
+			color = {232, 188, 74},
+			material = "Metal",
+			attach = "Left Arm",
+		}, {
+			name = "ShieldBandV",
+			shape = "box",
+			size = {0.28, 2, 0.24},
+			pos = {-2.17, 3, -0.1},
+			color = {236, 236, 236},
+			material = "Metal",
+			attach = "Left Arm",
+		}, {
+			name = "ShieldBandH",
+			shape = "box",
+			size = {0.28, 0.24, 1.5},
+			pos = {-2.17, 3.4, -0.1},
+			color = {236, 236, 236},
+			material = "Metal",
+			attach = "Left Arm",
+		}},
+		rig = "R6",
+	},
+	Hero_Mage = {
+		root = "HumanoidRootPart",
+		barTop = 7.9,
+		height = 7.13,
+		parts = {{
+			name = "HumanoidRootPart",
+			shape = "box",
+			size = {2, 2, 1},
+			pos = {0, 3, 0},
+			color = {163, 162, 165},
+			material = "SmoothPlastic",
+			alpha = 1,
+		}, {
+			name = "Torso",
+			shape = "box",
+			size = {2, 2, 1},
+			pos = {0, 3, 0},
+			color = {104, 58, 176},
+			material = "Fabric",
+		}, {
+			name = "Head",
+			shape = "head",
+			size = {2, 1, 1},
+			pos = {0, 4.5, 0},
+			color = {234, 196, 160},
+			material = "SmoothPlastic",
+		}, {
+			name = "Left Arm",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {-1.5, 3, 0},
+			color = {104, 58, 176},
+			material = "Fabric",
+		}, {
+			name = "Right Arm",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {1.5, 3, 0},
+			color = {104, 58, 176},
+			material = "Fabric",
+		}, {
+			name = "Left Leg",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {-0.5, 1, 0},
+			color = {70, 36, 128},
+			material = "Fabric",
+		}, {
+			name = "Right Leg",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {0.5, 1, 0},
+			color = {70, 36, 128},
+			material = "Fabric",
+		}, {
+			name = "Skirt",
+			shape = "box",
+			size = {2.15, 2, 1.3},
+			pos = {0, 1.1, 0},
+			color = {104, 58, 176},
+			material = "Fabric",
+			attach = "Torso",
+		}, {
+			name = "SkirtFlare",
+			shape = "box",
+			size = {2.45, 0.7, 1.55},
+			pos = {0, 0.4, 0},
+			color = {104, 58, 176},
+			material = "Fabric",
+			attach = "Torso",
+		}, {
+			name = "Hem",
+			shape = "box",
+			size = {2.5, 0.2, 1.6},
+			pos = {0, 0.12, 0},
+			color = "team",
+			material = "Fabric",
+			attach = "Torso",
+		}, {
+			name = "Sash",
+			shape = "box",
+			size = {0.4, 2.7, 1.04},
+			pos = {0, 3, 0},
+			color = "team",
+			material = "Fabric",
+			rot = {0, 0, 35},
+			attach = "Torso",
+		}, {
+			name = "Belt",
+			shape = "box",
+			size = {2.06, 0.26, 1.06},
+			pos = {0, 2.1, 0},
+			color = {232, 188, 74},
+			material = "Metal",
+			attach = "Torso",
+		}, {
+			name = "Collar",
+			shape = "box",
+			size = {2.1, 0.3, 1.1},
+			pos = {0, 3.95, 0},
+			color = {168, 120, 232},
+			material = "Fabric",
+			attach = "Torso",
+		}, {
+			name = "CuffL",
+			shape = "box",
+			size = {1.24, 0.55, 1.24},
+			pos = {-1.5, 2.25, 0},
+			color = {168, 120, 232},
+			material = "Fabric",
+			attach = "Left Arm",
+		}, {
+			name = "HandL",
+			shape = "box",
+			size = {0.8, 0.5, 0.8},
+			pos = {-1.5, 1.75, 0},
+			color = {234, 196, 160},
+			material = "SmoothPlastic",
+			attach = "Left Arm",
+		}, {
+			name = "CuffR",
+			shape = "box",
+			size = {1.24, 0.55, 1.24},
+			pos = {1.5, 2.25, 0},
+			color = {168, 120, 232},
+			material = "Fabric",
+			attach = "Right Arm",
+		}, {
+			name = "HandR",
+			shape = "box",
+			size = {0.8, 0.5, 0.8},
+			pos = {1.5, 1.75, 0},
+			color = {234, 196, 160},
+			material = "SmoothPlastic",
+			attach = "Right Arm",
+		}, {
+			name = "EyeL",
+			shape = "box",
+			size = {0.18, 0.22, 0.05},
+			pos = {-0.28, 4.6, -0.64},
+			color = {22, 22, 26},
+			material = "SmoothPlastic",
+			attach = "Head",
+		}, {
+			name = "EyeR",
+			shape = "box",
+			size = {0.18, 0.22, 0.05},
+			pos = {0.28, 4.6, -0.64},
+			color = {22, 22, 26},
+			material = "SmoothPlastic",
+			attach = "Head",
+		}, {
+			name = "Beard",
+			shape = "box",
+			size = {1, 0.9, 0.3},
+			pos = {0, 4, -0.66},
+			color = {236, 236, 236},
+			material = "Fabric",
+			attach = "Head",
+		}, {
+			name = "BeardTip",
+			shape = "box",
+			size = {0.6, 0.45, 0.28},
+			pos = {0, 3.35, -0.66},
+			color = {236, 236, 236},
+			material = "Fabric",
+			attach = "Head",
+		}, {
+			name = "HatBrim",
+			shape = "cyl",
+			size = {0.16, 2.8},
+			pos = {0, 5.15, 0},
+			color = {70, 36, 128},
+			material = "Fabric",
+			attach = "Head",
+		}, {
+			name = "HatBand",
+			shape = "cyl",
+			size = {0.24, 1.66},
+			pos = {0, 5.34, 0},
+			color = "team",
+			material = "Fabric",
+			attach = "Head",
+		}, {
+			name = "HatLow",
+			shape = "cyl",
+			size = {0.55, 1.6},
+			pos = {0, 5.5, 0},
+			color = {70, 36, 128},
+			material = "Fabric",
+			attach = "Head",
+		}, {
+			name = "HatMid",
+			shape = "cyl",
+			size = {0.6, 1.2},
+			pos = {0.05, 6.05, 0.05},
+			color = {70, 36, 128},
+			material = "Fabric",
+			rot = {6, 0, -6},
+			attach = "Head",
+		}, {
+			name = "HatHigh",
+			shape = "cyl",
+			size = {0.55, 0.8},
+			pos = {0.15, 6.55, 0.12},
+			color = {70, 36, 128},
+			material = "Fabric",
+			rot = {12, 0, -14},
+			attach = "Head",
+		}, {
+			name = "HatStar",
+			shape = "ball",
+			size = {0.42},
+			pos = {0.3, 6.92, 0.22},
+			color = {232, 188, 74},
+			material = "Neon",
+			attach = "Head",
+		}, {
+			name = "Staff",
+			shape = "box",
+			size = {0.24, 5.4, 0.24},
+			pos = {1.5, 2.6, -0.55},
+			color = {120, 82, 48},
+			material = "Wood",
+			attach = "Right Arm",
+		}, {
+			name = "StaffRing",
+			shape = "cyl",
+			size = {0.14, 1.05},
+			pos = {1.5, 5.4, -0.55},
+			color = {232, 188, 74},
+			material = "Metal",
+			rot = {90, 0, 0},
+			attach = "Right Arm",
+		}, {
+			name = "StaffClawL",
+			shape = "box",
+			size = {0.14, 0.6, 0.14},
+			pos = {1.15, 5.55, -0.55},
+			color = {232, 188, 74},
+			material = "Metal",
+			rot = {0, 0, 25},
+			attach = "Right Arm",
+		}, {
+			name = "StaffClawR",
+			shape = "box",
+			size = {0.14, 0.6, 0.14},
+			pos = {1.85, 5.55, -0.55},
+			color = {232, 188, 74},
+			material = "Metal",
+			rot = {0, 0, -25},
+			attach = "Right Arm",
+		}, {
+			name = "StaffOrb",
+			shape = "ball",
+			size = {0.8},
+			pos = {1.5, 5.45, -0.55},
+			color = {196, 130, 255},
+			material = "Neon",
+			attach = "Right Arm",
+		}, {
+			name = "HandOrb",
+			shape = "ball",
+			size = {0.55},
+			pos = {-1.5, 1.25, -0.25},
+			color = {196, 130, 255},
+			material = "Neon",
+			alpha = 0.25,
+			attach = "Left Arm",
+		}},
+		rig = "R6",
+	},
+	Hero_Ranger = {
+		root = "HumanoidRootPart",
+		barTop = 6.9,
+		height = 5.95,
+		parts = {{
+			name = "HumanoidRootPart",
+			shape = "box",
+			size = {2, 2, 1},
+			pos = {0, 3, 0},
+			color = {163, 162, 165},
+			material = "SmoothPlastic",
+			alpha = 1,
+		}, {
+			name = "Torso",
+			shape = "box",
+			size = {2, 2, 1},
+			pos = {0, 3, 0},
+			color = {64, 122, 62},
+			material = "Fabric",
+		}, {
+			name = "Head",
+			shape = "head",
+			size = {2, 1, 1},
+			pos = {0, 4.5, 0},
+			color = {234, 196, 160},
+			material = "SmoothPlastic",
+		}, {
+			name = "Left Arm",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {-1.5, 3, 0},
+			color = {64, 122, 62},
+			material = "Fabric",
+		}, {
+			name = "Right Arm",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {1.5, 3, 0},
+			color = {64, 122, 62},
+			material = "Fabric",
+		}, {
+			name = "Left Leg",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {-0.5, 1, 0},
+			color = {96, 72, 46},
+			material = "Fabric",
+		}, {
+			name = "Right Leg",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {0.5, 1, 0},
+			color = {96, 72, 46},
+			material = "Fabric",
+		}, {
+			name = "BootL",
+			shape = "box",
+			size = {1.06, 0.8, 1.12},
+			pos = {-0.5, 0.4, -0.03},
+			color = {70, 46, 28},
+			material = "Fabric",
+			attach = "Left Leg",
+		}, {
+			name = "BootR",
+			shape = "box",
+			size = {1.06, 0.8, 1.12},
+			pos = {0.5, 0.4, -0.03},
+			color = {70, 46, 28},
+			material = "Fabric",
+			attach = "Right Leg",
+		}, {
+			name = "TunicSkirt",
+			shape = "box",
+			size = {2.08, 0.5, 1.08},
+			pos = {0, 1.85, 0},
+			color = {64, 122, 62},
+			material = "Fabric",
+			attach = "Torso",
+		}, {
+			name = "Belt",
+			shape = "box",
+			size = {2.08, 0.25, 1.08},
+			pos = {0, 2.15, 0},
+			color = {112, 74, 42},
+			material = "Fabric",
+			attach = "Torso",
+		}, {
+			name = "Strap",
+			shape = "box",
+			size = {0.3, 2.6, 1.06},
+			pos = {0, 3, 0},
+			color = {112, 74, 42},
+			material = "Fabric",
+			rot = {0, 0, -38},
+			attach = "Torso",
+		}, {
+			name = "Cape",
+			shape = "box",
+			size = {1.9, 2.8, 0.1},
+			pos = {0, 2.75, 0.68},
+			color = "team",
+			material = "Fabric",
+			rot = {7, 0, 0},
+			attach = "Torso",
+		}, {
+			name = "Quiver",
+			shape = "cyl",
+			size = {2.3, 0.7},
+			pos = {0.55, 3.4, 0.82},
+			color = {112, 74, 42},
+			material = "Fabric",
+			rot = {0, 0, -18},
+			attach = "Torso",
+		}, {
+			name = "Arrow0",
+			shape = "box",
+			size = {0.08, 0.9, 0.08},
+			pos = {0.86, 4.8, 0.772},
+			color = {120, 82, 48},
+			material = "Wood",
+			rot = {0, 0, -18},
+			attach = "Torso",
+		}, {
+			name = "Fletch0",
+			shape = "box",
+			size = {0.06, 0.4, 0.26},
+			pos = {1, 5.2, 0.772},
+			color = "team",
+			material = "Fabric",
+			rot = {0, 0, -18},
+			attach = "Torso",
+		}, {
+			name = "Arrow1",
+			shape = "box",
+			size = {0.08, 0.9, 0.08},
+			pos = {1.06, 4.8, 0.852},
+			color = {120, 82, 48},
+			material = "Wood",
+			rot = {0, 0, -18},
+			attach = "Torso",
+		}, {
+			name = "Fletch1",
+			shape = "box",
+			size = {0.06, 0.4, 0.26},
+			pos = {1.2, 5.2, 0.852},
+			color = "team",
+			material = "Fabric",
+			rot = {0, 0, -18},
+			attach = "Torso",
+		}, {
+			name = "Arrow2",
+			shape = "box",
+			size = {0.08, 0.9, 0.08},
+			pos = {1.24, 4.8, 0.924},
+			color = {120, 82, 48},
+			material = "Wood",
+			rot = {0, 0, -18},
+			attach = "Torso",
+		}, {
+			name = "Fletch2",
+			shape = "box",
+			size = {0.06, 0.4, 0.26},
+			pos = {1.38, 5.2, 0.924},
+			color = "team",
+			material = "Fabric",
+			rot = {0, 0, -18},
+			attach = "Torso",
+		}, {
+			name = "BracerL",
+			shape = "box",
+			size = {1.08, 0.7, 1.08},
+			pos = {-1.5, 2.3, 0},
+			color = {112, 74, 42},
+			material = "Fabric",
+			attach = "Left Arm",
+		}, {
+			name = "HandL",
+			shape = "box",
+			size = {0.8, 0.4, 0.8},
+			pos = {-1.5, 1.8, 0},
+			color = {234, 196, 160},
+			material = "SmoothPlastic",
+			attach = "Left Arm",
+		}, {
+			name = "BracerR",
+			shape = "box",
+			size = {1.08, 0.7, 1.08},
+			pos = {1.5, 2.3, 0},
+			color = {112, 74, 42},
+			material = "Fabric",
+			attach = "Right Arm",
+		}, {
+			name = "HandR",
+			shape = "box",
+			size = {0.8, 0.4, 0.8},
+			pos = {1.5, 1.8, 0},
+			color = {234, 196, 160},
+			material = "SmoothPlastic",
+			attach = "Right Arm",
+		}, {
+			name = "EyeL",
+			shape = "box",
+			size = {0.18, 0.22, 0.05},
+			pos = {-0.28, 4.6, -0.64},
+			color = {22, 22, 26},
+			material = "SmoothPlastic",
+			attach = "Head",
+		}, {
+			name = "EyeR",
+			shape = "box",
+			size = {0.18, 0.22, 0.05},
+			pos = {0.28, 4.6, -0.64},
+			color = {22, 22, 26},
+			material = "SmoothPlastic",
+			attach = "Head",
+		}, {
+			name = "Hood",
+			shape = "cyl",
+			size = {1.45, 1.6},
+			pos = {0, 4.62, 0.2},
+			color = {36, 78, 42},
+			material = "Fabric",
+			attach = "Head",
+		}, {
+			name = "HoodPeak",
+			shape = "wedge",
+			size = {1.1, 0.7, 1},
+			pos = {0, 5.6, 0.55},
+			color = {36, 78, 42},
+			material = "Fabric",
+			attach = "Head",
+		}, {
+			name = "HoodRim",
+			shape = "box",
+			size = {1.62, 0.2, 0.5},
+			pos = {0, 5.25, -0.4},
+			color = {36, 78, 42},
+			material = "Fabric",
+			attach = "Head",
+		}, {
+			name = "BowGrip",
+			shape = "box",
+			size = {0.22, 0.8, 0.28},
+			pos = {-1.5, 2.2, -0.7},
+			color = {70, 46, 28},
+			material = "SmoothPlastic",
+			attach = "Left Arm",
+		}, {
+			name = "BowUpper",
+			shape = "box",
+			size = {0.18, 1.9, 0.2},
+			pos = {-1.5, 3.493, -0.375},
+			color = {120, 82, 48},
+			material = "Wood",
+			rot = {20, 0, 0},
+			attach = "Left Arm",
+		}, {
+			name = "BowLower",
+			shape = "box",
+			size = {0.18, 1.9, 0.2},
+			pos = {-1.5, 0.907, -0.375},
+			color = {120, 82, 48},
+			material = "Wood",
+			rot = {-20, 0, 0},
+			attach = "Left Arm",
+		}, {
+			name = "BowString",
+			shape = "box",
+			size = {0.04, 3.6, 0.04},
+			pos = {-1.5, 2.2, -0.05},
+			color = {236, 236, 236},
+			material = "SmoothPlastic",
+			attach = "Left Arm",
+		}},
+		rig = "R6",
+	},
+	Hero_Guardian = {
+		root = "HumanoidRootPart",
+		barTop = 7.7,
+		height = 6.05,
+		parts = {{
+			name = "HumanoidRootPart",
+			shape = "box",
+			size = {2, 2, 1},
+			pos = {0, 3, 0},
+			color = {163, 162, 165},
+			material = "SmoothPlastic",
+			alpha = 1,
+		}, {
+			name = "Torso",
+			shape = "box",
+			size = {2, 2, 1},
+			pos = {0, 3, 0},
+			color = {212, 170, 72},
+			material = "Metal",
+		}, {
+			name = "Head",
+			shape = "head",
+			size = {2, 1, 1},
+			pos = {0, 4.5, 0},
+			color = {234, 196, 160},
+			material = "SmoothPlastic",
+		}, {
+			name = "Left Arm",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {-1.5, 3, 0},
+			color = {150, 108, 48},
+			material = "Metal",
+		}, {
+			name = "Right Arm",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {1.5, 3, 0},
+			color = {150, 108, 48},
+			material = "Metal",
+		}, {
+			name = "Left Leg",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {-0.5, 1, 0},
+			color = {150, 108, 48},
+			material = "Metal",
+		}, {
+			name = "Right Leg",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {0.5, 1, 0},
+			color = {150, 108, 48},
+			material = "Metal",
+		}, {
+			name = "GreaveL",
+			shape = "box",
+			size = {1.2, 1.3, 1.2},
+			pos = {-0.5, 0.95, 0},
+			color = {150, 108, 48},
+			material = "Metal",
+			attach = "Left Leg",
+		}, {
+			name = "BootL",
+			shape = "box",
+			size = {1.3, 0.6, 1.4},
+			pos = {-0.5, 0.3, -0.06},
+			color = {212, 170, 72},
+			material = "Metal",
+			attach = "Left Leg",
+		}, {
+			name = "GreaveR",
+			shape = "box",
+			size = {1.2, 1.3, 1.2},
+			pos = {0.5, 0.95, 0},
+			color = {150, 108, 48},
+			material = "Metal",
+			attach = "Right Leg",
+		}, {
+			name = "BootR",
+			shape = "box",
+			size = {1.3, 0.6, 1.4},
+			pos = {0.5, 0.3, -0.06},
+			color = {212, 170, 72},
+			material = "Metal",
+			attach = "Right Leg",
+		}, {
+			name = "Breastplate",
+			shape = "box",
+			size = {2.5, 2.2, 1.5},
+			pos = {0, 3.1, 0},
+			color = {212, 170, 72},
+			material = "Metal",
+			attach = "Torso",
+		}, {
+			name = "Chest",
+			shape = "box",
+			size = {2.1, 1.1, 0.1},
+			pos = {0, 3.55, -0.77},
+			color = {150, 108, 48},
+			material = "Metal",
+			attach = "Torso",
+		}, {
+			name = "Emblem",
+			shape = "box",
+			size = {0.85, 0.85, 0.1},
+			pos = {0, 3.4, -0.84},
+			color = "team",
+			material = "Neon",
+			rot = {0, 0, 45},
+			attach = "Torso",
+		}, {
+			name = "Belt",
+			shape = "box",
+			size = {2.56, 0.35, 1.56},
+			pos = {0, 2.15, 0},
+			color = {150, 108, 48},
+			material = "Metal",
+			attach = "Torso",
+		}, {
+			name = "Fauld",
+			shape = "box",
+			size = {1.6, 0.7, 0.12},
+			pos = {0, 1.8, -0.76},
+			color = "team",
+			material = "Fabric",
+			attach = "Torso",
+		}, {
+			name = "PauldronL",
+			shape = "ball",
+			size = {1.75},
+			pos = {-1.65, 4.1, 0},
+			color = {212, 170, 72},
+			material = "Metal",
+			attach = "Left Arm",
+		}, {
+			name = "SpikeL",
+			shape = "wedge",
+			size = {0.3, 0.7, 0.5},
+			pos = {-1.74, 5.1, 0},
+			color = {236, 226, 200},
+			material = "SmoothPlastic",
+			rot = {0, -90, 0},
+			attach = "Left Arm",
+		}, {
+			name = "GauntletL",
+			shape = "box",
+			size = {1.3, 0.7, 1.3},
+			pos = {-1.5, 2.3, 0},
+			color = {212, 170, 72},
+			material = "Metal",
+			attach = "Left Arm",
+		}, {
+			name = "PauldronR",
+			shape = "ball",
+			size = {1.75},
+			pos = {1.65, 4.1, 0},
+			color = {212, 170, 72},
+			material = "Metal",
+			attach = "Right Arm",
+		}, {
+			name = "SpikeR",
+			shape = "wedge",
+			size = {0.3, 0.7, 0.5},
+			pos = {1.74, 5.1, 0},
+			color = {236, 226, 200},
+			material = "SmoothPlastic",
+			rot = {0, 90, 0},
+			attach = "Right Arm",
+		}, {
+			name = "GauntletR",
+			shape = "box",
+			size = {1.3, 0.7, 1.3},
+			pos = {1.5, 2.3, 0},
+			color = {212, 170, 72},
+			material = "Metal",
+			attach = "Right Arm",
+		}, {
+			name = "Helmet",
+			shape = "box",
+			size = {1.7, 1.55, 1.7},
+			pos = {0, 4.6, 0},
+			color = {150, 108, 48},
+			material = "Metal",
+			attach = "Head",
+		}, {
+			name = "HelmetCrest",
+			shape = "box",
+			size = {0.3, 0.35, 1.8},
+			pos = {0, 5.52, 0},
+			color = {212, 170, 72},
+			material = "Metal",
+			attach = "Head",
+		}, {
+			name = "VisorSlit",
+			shape = "box",
+			size = {1.2, 0.16, 0.08},
+			pos = {0, 4.7, -0.86},
+			color = "team",
+			material = "Neon",
+			attach = "Head",
+		}, {
+			name = "HornL",
+			shape = "box",
+			size = {0.3, 1.2, 0.3},
+			pos = {-1.05, 5.45, 0},
+			color = {236, 226, 200},
+			material = "SmoothPlastic",
+			rot = {0, 0, 30},
+			attach = "Head",
+		}, {
+			name = "HornR",
+			shape = "box",
+			size = {0.3, 1.2, 0.3},
+			pos = {1.05, 5.45, 0},
+			color = {236, 226, 200},
+			material = "SmoothPlastic",
+			rot = {0, 0, -30},
+			attach = "Head",
+		}, {
+			name = "Shield",
+			shape = "box",
+			size = {0.4, 3.6, 2.4},
+			pos = {-2.35, 3, -0.5},
+			color = "team",
+			material = "Metal",
+			rot = {0, -10, 0},
+			attach = "Left Arm",
+		}, {
+			name = "ShieldFrameTop",
+			shape = "box",
+			size = {0.44, 0.25, 2.5},
+			pos = {-2.35, 4.85, -0.5},
+			color = {212, 170, 72},
+			material = "Metal",
+			rot = {0, -10, 0},
+			attach = "Left Arm",
+		}, {
+			name = "ShieldFrameBot",
+			shape = "box",
+			size = {0.44, 0.25, 2.5},
+			pos = {-2.35, 1.15, -0.5},
+			color = {212, 170, 72},
+			material = "Metal",
+			rot = {0, -10, 0},
+			attach = "Left Arm",
+		}, {
+			name = "ShieldBoss",
+			shape = "ball",
+			size = {0.9},
+			pos = {-2.58, 3, -0.55},
+			color = {212, 170, 72},
+			material = "Metal",
+			attach = "Left Arm",
+		}, {
+			name = "HammerHandle",
+			shape = "box",
+			size = {0.3, 3.4, 0.3},
+			pos = {1.5, 2.4, -0.75},
+			color = {120, 82, 48},
+			material = "Wood",
+			attach = "Right Arm",
+		}, {
+			name = "HammerHead",
+			shape = "box",
+			size = {0.9, 1, 1.8},
+			pos = {1.5, 4.1, -0.75},
+			color = {88, 92, 104},
+			material = "Metal",
+			attach = "Right Arm",
+		}, {
+			name = "HammerBand",
+			shape = "box",
+			size = {0.95, 1.05, 0.3},
+			pos = {1.5, 4.1, -0.75},
+			color = {212, 170, 72},
+			material = "Metal",
+			attach = "Right Arm",
+		}},
+		rig = "R6",
+	},
+	Hero_Assassin = {
+		root = "HumanoidRootPart",
+		barTop = 6.9,
+		height = 6.03,
+		parts = {{
+			name = "HumanoidRootPart",
+			shape = "box",
+			size = {2, 2, 1},
+			pos = {0, 3, 0},
+			color = {163, 162, 165},
+			material = "SmoothPlastic",
+			alpha = 1,
+		}, {
+			name = "Torso",
+			shape = "box",
+			size = {2, 2, 1},
+			pos = {0, 3, 0},
+			color = {48, 48, 60},
+			material = "Fabric",
+		}, {
+			name = "Head",
+			shape = "head",
+			size = {2, 1, 1},
+			pos = {0, 4.5, 0},
+			color = {234, 196, 160},
+			material = "SmoothPlastic",
+		}, {
+			name = "Left Arm",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {-1.5, 3, 0},
+			color = {48, 48, 60},
+			material = "Fabric",
+		}, {
+			name = "Right Arm",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {1.5, 3, 0},
+			color = {48, 48, 60},
+			material = "Fabric",
+		}, {
+			name = "Left Leg",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {-0.5, 1, 0},
+			color = {48, 48, 60},
+			material = "Fabric",
+		}, {
+			name = "Right Leg",
+			shape = "box",
+			size = {1, 2, 1},
+			pos = {0.5, 1, 0},
+			color = {48, 48, 60},
+			material = "Fabric",
+		}, {
+			name = "WrapL",
+			shape = "box",
+			size = {1.04, 0.25, 1.04},
+			pos = {-0.5, 1.2, 0},
+			color = "teamDark",
+			material = "Fabric",
+			attach = "Left Leg",
+		}, {
+			name = "BootL",
+			shape = "box",
+			size = {1.06, 0.6, 1.1},
+			pos = {-0.5, 0.3, -0.03},
+			color = {26, 26, 32},
+			material = "Fabric",
+			attach = "Left Leg",
+		}, {
+			name = "WrapR",
+			shape = "box",
+			size = {1.04, 0.25, 1.04},
+			pos = {0.5, 1.2, 0},
+			color = "teamDark",
+			material = "Fabric",
+			attach = "Right Leg",
+		}, {
+			name = "BootR",
+			shape = "box",
+			size = {1.06, 0.6, 1.1},
+			pos = {0.5, 0.3, -0.03},
+			color = {26, 26, 32},
+			material = "Fabric",
+			attach = "Right Leg",
+		}, {
+			name = "Vest",
+			shape = "box",
+			size = {1.7, 1.6, 0.08},
+			pos = {0, 3.1, -0.53},
+			color = {26, 26, 32},
+			material = "Fabric",
+			attach = "Torso",
+		}, {
+			name = "Belt",
+			shape = "box",
+			size = {2.06, 0.25, 1.06},
+			pos = {0, 2.1, 0},
+			color = {26, 26, 32},
+			material = "Fabric",
+			attach = "Torso",
+		}, {
+			name = "PouchL",
+			shape = "box",
+			size = {0.4, 0.4, 0.3},
+			pos = {-0.6, 2, -0.6},
+			color = {112, 74, 42},
+			material = "SmoothPlastic",
+			attach = "Torso",
+		}, {
+			name = "PouchR",
+			shape = "box",
+			size = {0.4, 0.4, 0.3},
+			pos = {0.6, 2, -0.6},
+			color = {112, 74, 42},
+			material = "SmoothPlastic",
+			attach = "Torso",
+		}, {
+			name = "Scarf",
+			shape = "box",
+			size = {1.6, 0.4, 1.15},
+			pos = {0, 3.95, 0},
+			color = "team",
+			material = "Fabric",
+			attach = "Torso",
+		}, {
+			name = "ScarfTail",
+			shape = "box",
+			size = {0.4, 1.6, 0.08},
+			pos = {0.45, 3.3, 0.62},
+			color = "team",
+			material = "Fabric",
+			rot = {18, 0, -8},
+			attach = "Torso",
+		}, {
+			name = "BracerL",
+			shape = "box",
+			size = {1.06, 0.6, 1.06},
+			pos = {-1.5, 2.3, 0},
+			color = {26, 26, 32},
+			material = "Fabric",
+			attach = "Left Arm",
+		}, {
+			name = "GripL",
+			shape = "box",
+			size = {0.2, 0.2, 0.6},
+			pos = {-1.5, 1.95, -0.35},
+			color = {70, 46, 28},
+			material = "SmoothPlastic",
+			attach = "Left Arm",
+		}, {
+			name = "GuardL",
+			shape = "box",
+			size = {0.55, 0.15, 0.15},
+			pos = {-1.5, 1.95, -0.7},
+			color = {88, 92, 104},
+			material = "Metal",
+			attach = "Left Arm",
+		}, {
+			name = "DaggerL",
+			shape = "box",
+			size = {0.22, 0.08, 1.6},
+			pos = {-1.5, 1.95, -1.55},
+			color = {222, 228, 238},
+			material = "Metal",
+			attach = "Left Arm",
+		}, {
+			name = "BracerR",
+			shape = "box",
+			size = {1.06, 0.6, 1.06},
+			pos = {1.5, 2.3, 0},
+			color = {26, 26, 32},
+			material = "Fabric",
+			attach = "Right Arm",
+		}, {
+			name = "GripR",
+			shape = "box",
+			size = {0.2, 0.2, 0.6},
+			pos = {1.5, 1.95, -0.35},
+			color = {70, 46, 28},
+			material = "SmoothPlastic",
+			attach = "Right Arm",
+		}, {
+			name = "GuardR",
+			shape = "box",
+			size = {0.55, 0.15, 0.15},
+			pos = {1.5, 1.95, -0.7},
+			color = {88, 92, 104},
+			material = "Metal",
+			attach = "Right Arm",
+		}, {
+			name = "DaggerR",
+			shape = "box",
+			size = {0.22, 0.08, 1.6},
+			pos = {1.5, 1.95, -1.55},
+			color = {222, 228, 238},
+			material = "Metal",
+			attach = "Right Arm",
+		}, {
+			name = "Hood",
+			shape = "cyl",
+			size = {1.45, 1.5},
+			pos = {0, 4.62, 0.15},
+			color = {26, 26, 32},
+			material = "Fabric",
+			attach = "Head",
+		}, {
+			name = "HoodPeak",
+			shape = "wedge",
+			size = {1, 0.75, 1},
+			pos = {0, 5.65, 0.45},
+			color = {26, 26, 32},
+			material = "Fabric",
+			attach = "Head",
+		}, {
+			name = "Mask",
+			shape = "box",
+			size = {1.3, 0.6, 0.08},
+			pos = {0, 4.25, -0.66},
+			color = {22, 22, 26},
+			material = "Fabric",
+			attach = "Head",
+		}, {
+			name = "EyeL",
+			shape = "box",
+			size = {0.3, 0.1, 0.05},
+			pos = {-0.28, 4.7, -0.66},
+			color = "team",
+			material = "Neon",
+			attach = "Head",
+		}, {
+			name = "EyeR",
+			shape = "box",
+			size = {0.3, 0.1, 0.05},
+			pos = {0.28, 4.7, -0.66},
+			color = "team",
+			material = "Neon",
+			attach = "Head",
+		}},
+		rig = "R6",
+	},
+	Minion_melee = {
+		root = "Body",
+		barTop = 4,
+		height = 3.35,
+		parts = {{
+			name = "LegL",
+			shape = "box",
+			size = {0.5, 0.9, 0.55},
+			pos = {-0.32, 0.45, 0},
+			color = "teamDark",
+			material = "SmoothPlastic",
+		}, {
+			name = "LegR",
+			shape = "box",
+			size = {0.5, 0.9, 0.55},
+			pos = {0.32, 0.45, 0},
+			color = "teamDark",
+			material = "SmoothPlastic",
+		}, {
+			name = "Body",
+			shape = "box",
+			size = {1.4, 1.2, 0.95},
+			pos = {0, 1.5, 0},
+			color = "team",
+			material = "SmoothPlastic",
+		}, {
+			name = "Belt",
+			shape = "box",
+			size = {1.44, 0.2, 1},
+			pos = {0, 1, 0},
+			color = {112, 74, 42},
+			material = "SmoothPlastic",
+		}, {
+			name = "Chest",
+			shape = "box",
+			size = {1, 0.7, 0.08},
+			pos = {0, 1.6, -0.5},
+			color = {170, 176, 188},
+			material = "Metal",
+		}, {
+			name = "Head",
+			shape = "ball",
+			size = {1.05},
+			pos = {0, 2.55, 0},
+			color = {170, 176, 188},
+			material = "Metal",
+		}, {
+			name = "Visor",
+			shape = "box",
+			size = {0.7, 0.14, 0.1},
+			pos = {0, 2.55, -0.48},
+			color = "teamLight",
+			material = "Neon",
+		}, {
+			name = "Crest",
+			shape = "box",
+			size = {0.15, 0.4, 0.8},
+			pos = {0, 3.15, 0.05},
+			color = "team",
+			material = "Fabric",
+		}, {
+			name = "ArmL",
+			shape = "box",
+			size = {0.4, 1, 0.45},
+			pos = {-0.88, 1.55, 0},
+			color = "team",
+			material = "SmoothPlastic",
+		}, {
+			name = "ArmR",
+			shape = "box",
+			size = {0.4, 1, 0.45},
+			pos = {0.88, 1.55, 0},
+			color = "team",
+			material = "SmoothPlastic",
+		}, {
+			name = "Sword",
+			shape = "box",
+			size = {0.16, 0.1, 1.5},
+			pos = {0.88, 1.1, -0.85},
+			color = {222, 228, 238},
+			material = "Metal",
+		}, {
+			name = "SwordGuard",
+			shape = "box",
+			size = {0.4, 0.1, 0.12},
+			pos = {0.88, 1.1, -0.15},
+			color = {232, 188, 74},
+			material = "Metal",
+		}, {
+			name = "Shield",
+			shape = "cyl",
+			size = {0.16, 1.25},
+			pos = {-1.15, 1.6, -0.1},
+			color = "team",
+			material = "Metal",
+			rot = {0, 0, 90},
+		}, {
+			name = "ShieldBoss",
+			shape = "ball",
+			size = {0.4},
+			pos = {-1.25, 1.6, -0.1},
+			color = {170, 176, 188},
+			material = "Metal",
+		}},
+	},
+	Minion_caster = {
+		root = "Body",
+		barTop = 3.8,
+		height = 3.1,
+		parts = {{
+			name = "RobeLow",
+			shape = "cyl",
+			size = {0.8, 1.7},
+			pos = {0, 0.4, 0},
+			color = "teamDark",
+			material = "Fabric",
+		}, {
+			name = "Body",
+			shape = "cyl",
+			size = {0.9, 1.35},
+			pos = {0, 1.2, 0},
+			color = "team",
+			material = "Fabric",
+		}, {
+			name = "Collar",
+			shape = "cyl",
+			size = {0.2, 1.1},
+			pos = {0, 1.72, 0},
+			color = {232, 188, 74},
+			material = "Metal",
+		}, {
+			name = "Head",
+			shape = "ball",
+			size = {0.95},
+			pos = {0, 2.2, 0},
+			color = "teamDark",
+			material = "Fabric",
+		}, {
+			name = "Hood",
+			shape = "wedge",
+			size = {0.8, 0.6, 0.7},
+			pos = {0, 2.8, 0.15},
+			color = "teamDark",
+			material = "Fabric",
+		}, {
+			name = "EyeL",
+			shape = "box",
+			size = {0.16, 0.12, 0.05},
+			pos = {-0.18, 2.25, -0.46},
+			color = "teamLight",
+			material = "Neon",
+		}, {
+			name = "EyeR",
+			shape = "box",
+			size = {0.16, 0.12, 0.05},
+			pos = {0.18, 2.25, -0.46},
+			color = "teamLight",
+			material = "Neon",
+		}, {
+			name = "Wand",
+			shape = "box",
+			size = {0.12, 1.6, 0.12},
+			pos = {0.75, 1.4, -0.35},
+			color = {120, 82, 48},
+			material = "Wood",
+		}, {
+			name = "Orb",
+			shape = "ball",
+			size = {0.55},
+			pos = {0.75, 2.35, -0.35},
+			color = "teamLight",
+			material = "Neon",
+		}, {
+			name = "OrbGlow",
+			shape = "ball",
+			size = {0.95},
+			pos = {0.75, 2.35, -0.35},
+			color = "teamLight",
+			material = "Neon",
+			alpha = 0.7,
+		}},
+	},
+	Minion_siege = {
+		root = "Body",
+		barTop = 4.6,
+		height = 4.05,
+		parts = {{
+			name = "Body",
+			shape = "box",
+			size = {2.4, 0.7, 3.6},
+			pos = {0, 1.2, 0},
+			color = {120, 82, 48},
+			material = "Wood",
+		}, {
+			name = "Deck",
+			shape = "box",
+			size = {2.2, 0.2, 3.4},
+			pos = {0, 1.65, 0},
+			color = {100, 68, 40},
+			material = "Wood",
+		}, {
+			name = "ArmorL",
+			shape = "box",
+			size = {0.1, 0.65, 3.2},
+			pos = {-1.26, 1.25, 0},
+			color = "team",
+			material = "Metal",
+		}, {
+			name = "WheelLF",
+			shape = "cyl",
+			size = {0.4, 1.5},
+			pos = {-1.424, 0.75, -1.15},
+			color = {64, 46, 30},
+			material = "Wood",
+			rot = {0, 0, 90},
+		}, {
+			name = "HubLF",
+			shape = "cyl",
+			size = {0.5, 0.45},
+			pos = {-1.424, 0.75, -1.15},
+			color = {88, 92, 104},
+			material = "Metal",
+			rot = {0, 0, 90},
+		}, {
+			name = "WheelLB",
+			shape = "cyl",
+			size = {0.4, 1.5},
+			pos = {-1.424, 0.75, 1.15},
+			color = {64, 46, 30},
+			material = "Wood",
+			rot = {0, 0, 90},
+		}, {
+			name = "HubLB",
+			shape = "cyl",
+			size = {0.5, 0.45},
+			pos = {-1.424, 0.75, 1.15},
+			color = {88, 92, 104},
+			material = "Metal",
+			rot = {0, 0, 90},
+		}, {
+			name = "ArmorR",
+			shape = "box",
+			size = {0.1, 0.65, 3.2},
+			pos = {1.26, 1.25, 0},
+			color = "team",
+			material = "Metal",
+		}, {
+			name = "WheelRF",
+			shape = "cyl",
+			size = {0.4, 1.5},
+			pos = {1.424, 0.75, -1.15},
+			color = {64, 46, 30},
+			material = "Wood",
+			rot = {0, 0, 90},
+		}, {
+			name = "HubRF",
+			shape = "cyl",
+			size = {0.5, 0.45},
+			pos = {1.424, 0.75, -1.15},
+			color = {88, 92, 104},
+			material = "Metal",
+			rot = {0, 0, 90},
+		}, {
+			name = "WheelRB",
+			shape = "cyl",
+			size = {0.4, 1.5},
+			pos = {1.424, 0.75, 1.15},
+			color = {64, 46, 30},
+			material = "Wood",
+			rot = {0, 0, 90},
+		}, {
+			name = "HubRB",
+			shape = "cyl",
+			size = {0.5, 0.45},
+			pos = {1.424, 0.75, 1.15},
+			color = {88, 92, 104},
+			material = "Metal",
+			rot = {0, 0, 90},
+		}, {
+			name = "Mount",
+			shape = "box",
+			size = {1.2, 0.6, 1.2},
+			pos = {0, 2, 0.3},
+			color = {88, 92, 104},
+			material = "Metal",
+		}, {
+			name = "Barrel",
+			shape = "cyl",
+			size = {2.8, 0.85},
+			pos = {0, 2.45, -0.9},
+			color = {60, 62, 70},
+			material = "Metal",
+			rot = {90, 0, 0},
+		}, {
+			name = "Muzzle",
+			shape = "cyl",
+			size = {0.35, 1.1},
+			pos = {0, 2.45, -2.25},
+			color = {60, 62, 70},
+			material = "Metal",
+			rot = {90, 0, 0},
+		}, {
+			name = "BarrelBand",
+			shape = "cyl",
+			size = {0.25, 1},
+			pos = {0, 2.45, -0.6},
+			color = "team",
+			material = "Metal",
+			rot = {90, 0, 0},
+		}, {
+			name = "Breech",
+			shape = "ball",
+			size = {1.05},
+			pos = {0, 2.45, 0.55},
+			color = {60, 62, 70},
+			material = "Metal",
+		}, {
+			name = "FlagPole",
+			shape = "box",
+			size = {0.12, 2.4, 0.12},
+			pos = {0.95, 2.85, 1.55},
+			color = {120, 82, 48},
+			material = "Wood",
+		}, {
+			name = "Flag",
+			shape = "box",
+			size = {0.05, 0.75, 1},
+			pos = {0.95, 3.6, 2.05},
+			color = "team",
+			material = "Fabric",
+		}},
+	},
+	Tower = {
+		root = "Base",
+		barTop = 21,
+		height = 18.35,
+		parts = {{
+			name = "Base",
+			shape = "box",
+			size = {9, 1.5, 9},
+			pos = {0, 0.75, 0},
+			color = {92, 92, 102},
+			material = "Cobblestone",
+			collide = true,
+		}, {
+			name = "Step",
+			shape = "box",
+			size = {7.4, 1, 7.4},
+			pos = {0, 2, 0},
+			color = {128, 128, 138},
+			material = "Cobblestone",
+			collide = true,
+		}, {
+			name = "Shaft",
+			shape = "cyl",
+			size = {10.5, 6},
+			pos = {0, 7.75, 0},
+			color = {128, 128, 138},
+			material = "Slate",
+			collide = true,
+		}, {
+			name = "BandLow",
+			shape = "cyl",
+			size = {0.6, 6.4},
+			pos = {0, 3.9, 0},
+			color = {158, 158, 166},
+			material = "Slate",
+		}, {
+			name = "BandHigh",
+			shape = "cyl",
+			size = {0.6, 6.4},
+			pos = {0, 10.4, 0},
+			color = {158, 158, 166},
+			material = "Slate",
+		}, {
+			name = "Banner0",
+			shape = "box",
+			size = {1.7, 4.2, 0.1},
+			pos = {0, 7.5, -3.05},
+			color = "team",
+			material = "Fabric",
+			rot = {0, 0, 0},
+		}, {
+			name = "BannerRod0",
+			shape = "box",
+			size = {2, 0.18, 0.18},
+			pos = {0, 9.65, -3.11},
+			color = {232, 188, 74},
+			material = "Metal",
+			rot = {0, 0, 0},
+		}, {
+			name = "Banner1",
+			shape = "box",
+			size = {1.7, 4.2, 0.1},
+			pos = {0, 7.5, 3.05},
+			color = "team",
+			material = "Fabric",
+			rot = {0, 180, 0},
+		}, {
+			name = "BannerRod1",
+			shape = "box",
+			size = {2, 0.18, 0.18},
+			pos = {0, 9.65, 3.11},
+			color = {232, 188, 74},
+			material = "Metal",
+			rot = {0, 180, 0},
+		}, {
+			name = "Banner2",
+			shape = "box",
+			size = {1.7, 4.2, 0.1},
+			pos = {3.05, 7.5, 0},
+			color = "team",
+			material = "Fabric",
+			rot = {0, 90, 0},
+		}, {
+			name = "BannerRod2",
+			shape = "box",
+			size = {2, 0.18, 0.18},
+			pos = {3.11, 9.65, 0},
+			color = {232, 188, 74},
+			material = "Metal",
+			rot = {0, 90, 0},
+		}, {
+			name = "Banner3",
+			shape = "box",
+			size = {1.7, 4.2, 0.1},
+			pos = {-3.05, 7.5, 0},
+			color = "team",
+			material = "Fabric",
+			rot = {0, -90, 0},
+		}, {
+			name = "BannerRod3",
+			shape = "box",
+			size = {2, 0.18, 0.18},
+			pos = {-3.11, 9.65, 0},
+			color = {232, 188, 74},
+			material = "Metal",
+			rot = {0, -90, 0},
+		}, {
+			name = "Corbel",
+			shape = "cyl",
+			size = {0.8, 7},
+			pos = {0, 12.8, 0},
+			color = {92, 92, 102},
+			material = "Slate",
+		}, {
+			name = "Platform",
+			shape = "cyl",
+			size = {0.8, 8.2},
+			pos = {0, 13.6, 0},
+			color = {128, 128, 138},
+			material = "Slate",
+		}, {
+			name = "Merlon0",
+			shape = "box",
+			size = {1.5, 1.3, 1.1},
+			pos = {1.359, 14.65, 3.28},
+			color = {158, 158, 166},
+			material = "Slate",
+			rot = {0, 22.5, 0},
+		}, {
+			name = "Merlon1",
+			shape = "box",
+			size = {1.5, 1.3, 1.1},
+			pos = {3.28, 14.65, 1.359},
+			color = {158, 158, 166},
+			material = "Slate",
+			rot = {0, 67.5, 0},
+		}, {
+			name = "Merlon2",
+			shape = "box",
+			size = {1.5, 1.3, 1.1},
+			pos = {3.28, 14.65, -1.359},
+			color = {158, 158, 166},
+			material = "Slate",
+			rot = {0, 112.5, 0},
+		}, {
+			name = "Merlon3",
+			shape = "box",
+			size = {1.5, 1.3, 1.1},
+			pos = {1.359, 14.65, -3.28},
+			color = {158, 158, 166},
+			material = "Slate",
+			rot = {0, 157.5, 0},
+		}, {
+			name = "Merlon4",
+			shape = "box",
+			size = {1.5, 1.3, 1.1},
+			pos = {-1.359, 14.65, -3.28},
+			color = {158, 158, 166},
+			material = "Slate",
+			rot = {0, 202.5, 0},
+		}, {
+			name = "Merlon5",
+			shape = "box",
+			size = {1.5, 1.3, 1.1},
+			pos = {-3.28, 14.65, -1.359},
+			color = {158, 158, 166},
+			material = "Slate",
+			rot = {0, 247.5, 0},
+		}, {
+			name = "Merlon6",
+			shape = "box",
+			size = {1.5, 1.3, 1.1},
+			pos = {-3.28, 14.65, 1.359},
+			color = {158, 158, 166},
+			material = "Slate",
+			rot = {0, 292.5, 0},
+		}, {
+			name = "Merlon7",
+			shape = "box",
+			size = {1.5, 1.3, 1.1},
+			pos = {-1.359, 14.65, 3.28},
+			color = {158, 158, 166},
+			material = "Slate",
+			rot = {0, 337.5, 0},
+		}, {
+			name = "Pedestal",
+			shape = "cyl",
+			size = {1.2, 1.7},
+			pos = {0, 14.6, 0},
+			color = {232, 188, 74},
+			material = "Metal",
+		}, {
+			name = "Bowl",
+			shape = "cyl",
+			size = {0.4, 2.6},
+			pos = {0, 15.35, 0},
+			color = {232, 188, 74},
+			material = "Metal",
+		}, {
+			name = "Crystal",
+			shape = "box",
+			size = {1.9, 1.9, 1.9},
+			pos = {0, 17.4, 0},
+			color = "team",
+			material = "Neon",
+			rot = {45, 0, 35},
+		}, {
+			name = "Halo",
+			shape = "cyl",
+			size = {0.12, 4.2},
+			pos = {0, 17.4, 0},
+			color = "teamLight",
+			material = "Neon",
+			rot = {18, 0, 8},
+			alpha = 0.45,
+		}},
+		fire = "Crystal",
+	},
+	Nexus = {
+		root = "Base",
+		barTop = 15.5,
+		height = 12.1,
+		parts = {{
+			name = "Base",
+			shape = "box",
+			size = {16, 1.5, 16},
+			pos = {0, 0.75, 0},
+			color = {170, 170, 182},
+			material = "Marble",
+			collide = true,
+		}, {
+			name = "Step",
+			shape = "box",
+			size = {12.5, 1.2, 12.5},
+			pos = {0, 2.1, 0},
+			color = {214, 214, 222},
+			material = "Marble",
+			collide = true,
+		}, {
+			name = "Dais",
+			shape = "box",
+			size = {9, 1, 9},
+			pos = {0, 3.2, 0},
+			color = {170, 170, 182},
+			material = "Marble",
+			collide = true,
+		}, {
+			name = "Inlay",
+			shape = "box",
+			size = {9.1, 0.25, 9.1},
+			pos = {0, 3.6, 0},
+			color = "team",
+			material = "Neon",
+		}, {
+			name = "Pillar0",
+			shape = "box",
+			size = {1.2, 6, 1.2},
+			pos = {-6.4, 4.5, -6.4},
+			color = {214, 214, 222},
+			material = "Marble",
+			collide = true,
+		}, {
+			name = "PillarCap0",
+			shape = "box",
+			size = {1.6, 0.4, 1.6},
+			pos = {-6.4, 7.7, -6.4},
+			color = {232, 188, 74},
+			material = "Metal",
+		}, {
+			name = "PillarGem0",
+			shape = "ball",
+			size = {1},
+			pos = {-6.4, 8.4, -6.4},
+			color = "team",
+			material = "Neon",
+		}, {
+			name = "Pillar1",
+			shape = "box",
+			size = {1.2, 6, 1.2},
+			pos = {6.4, 4.5, -6.4},
+			color = {214, 214, 222},
+			material = "Marble",
+			collide = true,
+		}, {
+			name = "PillarCap1",
+			shape = "box",
+			size = {1.6, 0.4, 1.6},
+			pos = {6.4, 7.7, -6.4},
+			color = {232, 188, 74},
+			material = "Metal",
+		}, {
+			name = "PillarGem1",
+			shape = "ball",
+			size = {1},
+			pos = {6.4, 8.4, -6.4},
+			color = "team",
+			material = "Neon",
+		}, {
+			name = "Pillar2",
+			shape = "box",
+			size = {1.2, 6, 1.2},
+			pos = {-6.4, 4.5, 6.4},
+			color = {214, 214, 222},
+			material = "Marble",
+			collide = true,
+		}, {
+			name = "PillarCap2",
+			shape = "box",
+			size = {1.6, 0.4, 1.6},
+			pos = {-6.4, 7.7, 6.4},
+			color = {232, 188, 74},
+			material = "Metal",
+		}, {
+			name = "PillarGem2",
+			shape = "ball",
+			size = {1},
+			pos = {-6.4, 8.4, 6.4},
+			color = "team",
+			material = "Neon",
+		}, {
+			name = "Pillar3",
+			shape = "box",
+			size = {1.2, 6, 1.2},
+			pos = {6.4, 4.5, 6.4},
+			color = {214, 214, 222},
+			material = "Marble",
+			collide = true,
+		}, {
+			name = "PillarCap3",
+			shape = "box",
+			size = {1.6, 0.4, 1.6},
+			pos = {6.4, 7.7, 6.4},
+			color = {232, 188, 74},
+			material = "Metal",
+		}, {
+			name = "PillarGem3",
+			shape = "ball",
+			size = {1},
+			pos = {6.4, 8.4, 6.4},
+			color = "team",
+			material = "Neon",
+		}, {
+			name = "Pedestal",
+			shape = "cyl",
+			size = {1.6, 3.2},
+			pos = {0, 4.5, 0},
+			color = {232, 188, 74},
+			material = "Metal",
+		}, {
+			name = "Core",
+			shape = "box",
+			size = {5, 5, 5},
+			pos = {0, 9, 0},
+			color = "team",
+			material = "Neon",
+			rot = {45, 45, 0},
+		}, {
+			name = "CoreShell",
+			shape = "box",
+			size = {6.2, 6.2, 6.2},
+			pos = {0, 9, 0},
+			color = "teamLight",
+			material = "Glass",
+			rot = {45, 45, 0},
+			alpha = 0.75,
+		}, {
+			name = "RingA",
+			shape = "cyl",
+			size = {0.2, 11},
+			pos = {0, 9, 0},
+			color = "teamLight",
+			material = "Neon",
+			rot = {22, 0, 10},
+			alpha = 0.55,
+		}, {
+			name = "RingB",
+			shape = "cyl",
+			size = {0.2, 9},
+			pos = {0, 9, 0},
+			color = "teamLight",
+			material = "Neon",
+			rot = {-18, 0, -22},
+			alpha = 0.55,
+		}},
+	},
+	Tree = {
+		root = "Trunk",
+		barTop = 0,
+		height = 10.7,
+		parts = {{
+			name = "Trunk",
+			shape = "box",
+			size = {1.4, 5.2, 1.4},
+			pos = {0, 2.6, 0},
+			color = {104, 70, 42},
+			material = "Wood",
+			collide = true,
+		}, {
+			name = "Root1",
+			shape = "box",
+			size = {0.6, 0.6, 2.4},
+			pos = {0, 0.3, 0},
+			color = {96, 64, 38},
+			material = "Wood",
+		}, {
+			name = "Root2",
+			shape = "box",
+			size = {2.4, 0.6, 0.6},
+			pos = {0, 0.3, 0},
+			color = {96, 64, 38},
+			material = "Wood",
+		}, {
+			name = "Branch",
+			shape = "box",
+			size = {0.5, 2, 0.5},
+			pos = {0.8, 5.2, 0},
+			color = {104, 70, 42},
+			material = "Wood",
+			rot = {0, 0, -35},
+		}, {
+			name = "LeavesMain",
+			shape = "ball",
+			size = {6.2},
+			pos = {0, 6.4, 0},
+			color = {46, 112, 50},
+			material = "Grass",
+		}, {
+			name = "LeavesSide",
+			shape = "ball",
+			size = {4.6},
+			pos = {1.9, 6, 1},
+			color = {52, 124, 54},
+			material = "Grass",
+		}, {
+			name = "LeavesBack",
+			shape = "ball",
+			size = {4.2},
+			pos = {-1.6, 7.2, -0.9},
+			color = {40, 100, 46},
+			material = "Grass",
+		}, {
+			name = "LeavesTop",
+			shape = "ball",
+			size = {3.4},
+			pos = {0.2, 9, 0.3},
+			color = {58, 132, 58},
+			material = "Grass",
+		}},
+	},
+}
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX3"><Properties><string name="Name">ModelBuilder</string><ProtectedString name="Source"><![CDATA[--[[
+	Builds models from ModelSpecs (generated by tools/gen_models.py). Shared by the game
+	(server/ModelFactory) and the MOBA Model Kit Studio plugin, so both build identical models.
+
+	Part attributes (also what you set by hand when editing a model in Studio):
+	  TeamColor = "team" | "teamDark" | "teamLight"   recolored to the team's color in game
+	  Attach    = "Torso" | "Head" | "Left Arm" | ...  R6 limb a hero's gear part follows
+	              (parts without it follow the nearest limb)
+	Model attributes:
+	  MobaModel = spec name, e.g. "Hero_Knight". Marks a model made with the kit; its pivot
+	              (WorldPivot) is the ground point under the model's center.
+]]
+local Config = require(script.Parent.Config)
+local Specs = require(script.Parent.ModelSpecs)
+
+local ModelBuilder = {}
+ModelBuilder.Specs = Specs
+ModelBuilder.R6_LIMBS = { "Torso", "Head", "Left Arm", "Right Arm", "Left Leg", "Right Leg" }
+ModelBuilder.R6_BODY = { "HumanoidRootPart", "Torso", "Head", "Left Arm", "Right Arm", "Left Leg", "Right Leg" }
+
+local BLACK = Color3.new(0, 0, 0)
+local WHITE = Color3.new(1, 1, 1)
+
+function ModelBuilder.resolveColor(c, team)
+	if type(c) == "table" then
+		return Color3.fromRGB(c[1], c[2], c[3])
+	end
+	local base = Config.TeamColors[team] or Color3.fromRGB(200, 200, 200)
+	if c == "teamDark" then
+		return base:Lerp(BLACK, 0.4)
+	elseif c == "teamLight" then
+		return base:Lerp(WHITE, 0.35)
+	end
+	return base
+end
+
+function ModelBuilder.localCFrame(p, scale)
+	local pos = p.pos
+	local cf = CFrame.new(pos[1] * scale, pos[2] * scale, pos[3] * scale)
+	local rot = p.rot
+	if rot then
+		cf *= CFrame.Angles(math.rad(rot[1]), math.rad(rot[2]), math.rad(rot[3]))
+	end
+	if p.shape == "cyl" then
+		-- Roblox cylinders run along X; specs describe them standing up.
+		cf *= CFrame.Angles(0, 0, math.rad(90))
+	end
+	return cf
+end
+
+function ModelBuilder.partSize(p, scale)
+	local s = p.size
+	if p.shape == "ball" then
+		return Vector3.one * s[1] * scale
+	elseif p.shape == "cyl" then
+		return Vector3.new(s[1], s[2], s[2]) * scale
+	end
+	return Vector3.new(s[1], s[2], s[3]) * scale
+end
+
+function ModelBuilder.makePart(p, team, cframe, scale)
+	local part = Instance.new(p.shape == "wedge" and "WedgePart" or "Part")
+	if p.shape == "ball" then
+		part.Shape = Enum.PartType.Ball
+	elseif p.shape == "cyl" then
+		part.Shape = Enum.PartType.Cylinder
+	end
+	part.Name = p.name
+	part.Size = ModelBuilder.partSize(p, scale)
+	part.CFrame = cframe
+	part.Color = ModelBuilder.resolveColor(p.color, team)
+	part.Material = Enum.Material[p.material] or Enum.Material.SmoothPlastic
+	part.Transparency = p.alpha or 0
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.CastShadow = (p.alpha or 0) < 0.5
+	part.CanCollide = p.collide == true
+	part.CanTouch = false
+	part.Anchored = true
+	if p.shape == "head" then
+		local mesh = Instance.new("SpecialMesh")
+		mesh.MeshType = Enum.MeshType.Head
+		mesh.Scale = Vector3.one * 1.25
+		mesh.Parent = part
+	end
+	if type(p.color) == "string" then
+		part:SetAttribute("TeamColor", p.color)
+	end
+	if p.attach then
+		part:SetAttribute("Attach", p.attach)
+	end
+	return part
+end
+
+-- Builds a spec as plain anchored parts (no joints). Returns model, parts, root, fire.
+-- `cframe` is the ground point the model stands on.
+function ModelBuilder.buildParts(name, team, cframe, scale)
+	local spec = Specs[name]
+	assert(spec, "No model spec named " .. tostring(name))
+	cframe = cframe or CFrame.new()
+	scale = scale or 1
+	local model = Instance.new("Model")
+	model.Name = name
+	local parts, root, fire = {}, nil, nil
+	for _, p in ipairs(spec.parts) do
+		local part = ModelBuilder.makePart(p, team, cframe * ModelBuilder.localCFrame(p, scale), scale)
+		part.Parent = model
+		parts[#parts + 1] = part
+		if p.name == spec.root then
+			root = part
+		end
+		if p.name == spec.fire then
+			fire = part
+		end
+	end
+	model.PrimaryPart = root
+	model.WorldPivot = cframe
+	model:SetAttribute("MobaModel", name)
+	return model, parts, root, fire
+end
+
+-- Recolors every part tagged with a TeamColor attribute.
+function ModelBuilder.recolor(model, team)
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") then
+			local tc = d:GetAttribute("TeamColor")
+			if type(tc) == "string" then
+				d.Color = ModelBuilder.resolveColor(tc, team)
+			end
+		end
+	end
+end
+
+function ModelBuilder.weld(a, b)
+	local w = Instance.new("WeldConstraint")
+	w.Part0 = a
+	w.Part1 = b
+	w.Parent = b
+	return w
+end
+
+-- Finds the R6 body parts among `parts` (first match by name).
+function ModelBuilder.findBody(parts)
+	local body = {}
+	for _, part in ipairs(parts) do
+		if table.find(ModelBuilder.R6_BODY, part.Name) and not body[part.Name] then
+			body[part.Name] = part
+		end
+	end
+	return body
+end
+
+-- The limb a gear part should follow: its Attach attribute, else the nearest limb.
+function ModelBuilder.limbFor(part, body)
+	local attach = part:GetAttribute("Attach")
+	if type(attach) == "string" and body[attach] then
+		return attach
+	end
+	local best, bestDist = "Torso", math.huge
+	for _, name in ipairs(ModelBuilder.R6_LIMBS) do
+		local limb = body[name]
+		if limb then
+			local d = (limb.Position - part.Position).Magnitude
+			if d < bestDist then
+				best, bestDist = name, d
+			end
+		end
+	end
+	return best
+end
+
+---------------------------------------------------------------------------
+-- R6 rig assembly
+---------------------------------------------------------------------------
+-- Standard R6 joint orientations (the same C0/C1 rotations Roblox's own R6 rig uses).
+local ROOT_ROT = CFrame.new(0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 1, 0)
+local RIGHT_ROT = CFrame.new(0, 0, 0, 0, 0, 1, 0, 1, 0, -1, 0, 0)
+local LEFT_ROT = CFrame.new(0, 0, 0, 0, 0, -1, 0, 1, 0, 1, 0, 0)
+
+local function motor(name, part0, part1, c0)
+	local m = Instance.new("Motor6D")
+	m.Name = name
+	m.Part0 = part0
+	m.Part1 = part1
+	m.C0 = c0
+	-- C1 keeps Part1 exactly where it was placed.
+	m.C1 = part1.CFrame:Inverse() * (part0.CFrame * c0)
+	m.Parent = part0
+	return m
+end
+
+-- Turns a model's parts into an animatable R6 rig: HumanoidRootPart (anchored) -> joints ->
+-- limbs, with every other part welded to its limb. Returns the Humanoid, or nil and a reason.
+function ModelBuilder.assembleR6(model, parts)
+	local body = ModelBuilder.findBody(parts)
+	for _, name in ipairs(ModelBuilder.R6_BODY) do
+		if not body[name] then
+			return nil, "missing R6 body part '" .. name .. "'"
+		end
+	end
+	-- Clear joints the parts may already carry (e.g. from a model edited in Studio).
+	for _, part in ipairs(parts) do
+		for _, child in ipairs(part:GetChildren()) do
+			if child:IsA("JointInstance") or child:IsA("WeldConstraint") then
+				child:Destroy()
+			end
+		end
+	end
+	local hrp, torso = body.HumanoidRootPart, body.Torso
+	local hx, hy = torso.Size.X / 2, torso.Size.Y / 2
+	for _, part in ipairs(parts) do
+		part.Anchored = part == hrp
+		if part ~= hrp then
+			part.Massless = true
+		end
+	end
+	hrp.CanCollide = false
+	hrp.Transparency = 1
+	motor("RootJoint", hrp, torso, ROOT_ROT)
+	motor("Neck", torso, body.Head, CFrame.new(0, hy, 0) * ROOT_ROT)
+	motor("Right Shoulder", torso, body["Right Arm"], CFrame.new(hx, hy - 0.5, 0) * RIGHT_ROT)
+	motor("Left Shoulder", torso, body["Left Arm"], CFrame.new(-hx, hy - 0.5, 0) * LEFT_ROT)
+	motor("Right Hip", torso, body["Right Leg"], CFrame.new(hx, -hy, 0) * RIGHT_ROT)
+	motor("Left Hip", torso, body["Left Leg"], CFrame.new(-hx, -hy, 0) * LEFT_ROT)
+
+	for _, part in ipairs(parts) do
+		if not table.find(ModelBuilder.R6_BODY, part.Name) or body[part.Name] ~= part then
+			ModelBuilder.weld(body[ModelBuilder.limbFor(part, body)], part)
+		end
+	end
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid") or Instance.new("Humanoid")
+	humanoid.RigType = Enum.HumanoidRigType.R6
+	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+	humanoid.BreakJointsOnDeath = false
+	humanoid.RequiresNeck = false
+	humanoid.EvaluateStateMachine = false -- the server moves bots itself; only animations are needed
+	if not humanoid:FindFirstChildOfClass("Animator") then
+		Instance.new("Animator").Parent = humanoid
+	end
+	humanoid.Parent = model
+	return humanoid
+end
+
+return ModelBuilder
+]]></ProtectedString></Properties></Item></Item></roblox>

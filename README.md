@@ -53,12 +53,28 @@ The game is built around **R6**:
 - **Players wear their hero's gear.** When a player spawns as, say, the Knight, the helmet, tabard, pauldrons, sword and shield are welded onto their own R6 avatar. Hats and hair are removed when the hero wears a helmet or hood. Basic attacks and ability casts play a slash or lunge animation.
 - **One setting to change in Studio:** *Game Settings → Avatar → Avatar Type → R6*. Scripts can't change this. If players spawn as R15, the game still works, but players won't get hero gear and the Output shows a reminder.
 
+## Editing models in Studio (MOBA Model Kit plugin)
+
+The easiest way to change how anything looks. No code and no naming rules to remember.
+
+**Install (once):** in Studio, open *Plugins → Plugins Folder* and copy `plugin/MobaModelKit.rbxmx` into it, then restart Studio. A **Model Kit** button appears on the Plugins tab. (With Rojo: `rojo build plugin.project.json --plugin MobaModelKit.rbxmx`.)
+
+**Use it:**
+1. **Pick a model** (Knight, Tower, Melee minion...). An editable copy appears in *Workspace → MobaModelKit*, already selected and in view.
+2. **Edit it** like any Studio model: move, resize and recolor parts, delete pieces, or drop in MeshParts from Meshy or the Creator Store.
+   - Select parts and click **Use team color** to make them turn blue or red in game. **Preview Blue / Red** shows both.
+   - Heroes stay animated R6 rigs: keep the body part names (`Torso`, `Head`, `Left Arm`, `Right Arm`, `Left Leg`, `Right Leg`, `HumanoidRootPart`). Every other part follows the limb it's closest to, so new armor and weapons animate automatically. Players on R6 avatars wear the edited gear too.
+   - Keep the model's root part (`Base` for the tower and nexus, `Body` for minions, `Trunk` for the tree); the plugin warns you if it's missing.
+3. **Save for both teams**, or **Save Blue only / Save Red only** for meshes with team colors painted into their texture. Press Play and the game uses it. **Go back to the built-in model** removes your saved versions (Undo works).
+
+Saved models live in *ServerStorage → Models*. Delete the *Workspace → MobaModelKit* folder when you're done editing; it isn't used by the game.
+
 ## Models
 
 Every unit is built from Roblox parts, with no assets needed: armored heroes with weapons and shields, soldier/caster/cannon-cart minions, castle-style towers, a crystal nexus and leafy trees (256 parts across 11 models).
 
 - The models are defined in `tools/gen_models.py`. Run `python3 tools/gen_models.py` after editing it. It writes `src/shared/ModelSpecs.json` (which the game builds from) and `tools/model-viewer.html`, a 3D preview you can open in a browser.
-- **Swap in your own models (Creator Store, Blender, etc.):** create a folder named `Models` in `ServerStorage` and put a Model inside with one of these names: `Hero_Knight`, `Hero_Mage`, `Hero_Ranger`, `Hero_Guardian`, `Hero_Assassin`, `Minion_melee`, `Minion_caster`, `Minion_siege`, `Tower`, `Nexus`, `Tree`. The game then uses it instead of the built-in one. It is scaled to the same height, scripts inside it are deleted, and any part whose name starts with `Team` is recolored to the team color. Models should face -Z (the front in Studio). Drop-in hero models are used as rigid statues (no animation); to animate one, give it the same R6 part and joint names.
+- **Swap in a whole model without the plugin (Creator Store, Blender, Meshy):** create a folder named `Models` in `ServerStorage` and put a Model inside with one of these names: `Hero_Knight`, `Hero_Mage`, `Hero_Ranger`, `Hero_Guardian`, `Hero_Assassin`, `Minion_melee`, `Minion_caster`, `Minion_siege`, `Tower`, `Nexus`, `Tree`. The game then uses it instead of the built-in one. It is scaled to the same height, scripts inside it are deleted, and any part whose name starts with `Team` is recolored to the team color. Models should face -Z (the front in Studio). Drop-in hero models are used as rigid statues (no animation); to animate one, give it the same R6 part and joint names.
 - **Per-team versions:** a model named `Tower_Blue` or `Tower_Red` is used for that team ahead of plain `Tower`. Use this for meshes with team colors painted into their texture.
 - **Making better models with AI:** `art/meshy/` has clean reference renders of every model (5 views, both team colors) and a matching text prompt for each, ready for Meshy or other image-to-3D tools. See `art/meshy/README.md`.
 - Free models can contain malicious scripts. The loader strips them, but still prefer verified creators.
@@ -68,6 +84,7 @@ Every unit is built from Roblox parts, with no assets needed: armored heroes wit
 ```
 tools/
   gen_models.py    model definitions -> ModelSpecs.json + model-viewer.html
+  build_plugin.py  packages the Studio plugin into plugin/MobaModelKit.rbxmx
 src/
   shared/          -> ReplicatedStorage.Shared
     Config.lua       tuning values (gold, XP, waves, stats)
@@ -75,6 +92,7 @@ src/
     Items.lua        shop items
     MapData.lua      lane paths, tower/base positions
     ModelSpecs.json  generated part-by-part model definitions
+    ModelBuilder.lua builds models from the specs (shared by the game and the plugin)
   server/          -> ServerScriptService.Server
     Main.server.lua  match flow, teams, bots fill, remotes
     Units.lua        unit registry, damage, buffs, health bars
@@ -84,13 +102,17 @@ src/
     Structures.lua   towers + nexus
     Bots.lua         AI heroes
     MapBuilder.lua   procedural map
-    Effects.lua      visual effects
+    Effects.lua      tells clients which effects to draw (server keeps hit timing)
     ModelFactory.lua builds models (R6 hero rigs) from ModelSpecs.json or your drop-in Models folder
     Animations.lua   Roblox's default R6 idle / walk / slash animations
     Net.lua          RemoteEvents
   client/          -> StarterPlayerScripts.Client
     Main.client.lua  camera, input, click-to-move
     HUD.lua          all UI
+    FX.lua           draws projectiles, spell rings, flashes and dash trails locally
+plugin/
+  src/init.server.lua   MOBA Model Kit Studio plugin
+  MobaModelKit.rbxmx    ready-to-install plugin (built by tools/build_plugin.py)
 ```
 
 ## Adding a hero
@@ -100,5 +122,7 @@ Add an entry to `Heroes.Defs` in `src/shared/Heroes.lua` and append its id to `H
 ## Notes / next steps
 
 - The server is authoritative for all health, damage, cooldowns, gold and shop purchases. Clients only send intents (move target, cast at point, buy).
-- Minions and bots are anchored parts moved by the server, which is cheap and predictable. On a laggy connection their movement can look a bit choppy. Moving those visuals to the client would make it smoother.
+- **Smooth movement:** minions and bots are server-simulated physics bodies moved by velocity (`LinearVelocity` + `AlignOrientation`). Roblox interpolates physics on every client, so they glide smoothly even on slow connections. The server only sends a new velocity when a unit changes direction or speed.
+- **Client-side effects:** projectiles, skillshots, spell telegraphs, flashes and dash trails are drawn by each client (`src/client/FX.lua`) from one small message each. Hit timing and damage stay on the server.
+- **No snagging:** moving units are in their own collision group, so they never get stuck on towers, trees or players.
 - Ideas: jungle camps, more heroes and items, recall (B-to-base), fog of war, ranked matchmaking with a lobby place and `TeleportService`.

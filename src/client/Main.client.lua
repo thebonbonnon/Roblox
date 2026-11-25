@@ -14,6 +14,7 @@ local HeroDefs = require(Shared:WaitForChild("Heroes"))
 local MapData = require(Shared:WaitForChild("MapData"))
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local HUD = require(script.Parent:WaitForChild("HUD"))
+local FX = require(script.Parent:WaitForChild("FX"))
 
 local camera = workspace.CurrentCamera
 
@@ -303,5 +304,7 @@ end)
 Remotes.FX.OnClientEvent:Connect(function(kind, ...)
 	if kind == "dmg" then
 		HUD.damageNumber(...)
+	else
+		FX.handle(kind, ...)
 	end
 end)

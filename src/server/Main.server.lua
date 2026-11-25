@@ -22,6 +22,7 @@ local Bots = require(script.Parent.Bots)
 local Abilities = require(script.Parent.Abilities)
 
 Units.net = Net
+Effects.init(Net)
 HeroService.net = Net
 Players.CharacterAutoLoads = false
 

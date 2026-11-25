@@ -1,0 +1,9 @@
+{
+  "name": "MobaModelKit",
+  "tree": {
+    "$path": "plugin/src",
+    "Config": { "$path": "src/shared/Config.lua" },
+    "ModelSpecs": { "$path": "src/shared/ModelSpecs.json" },
+    "ModelBuilder": { "$path": "src/shared/ModelBuilder.lua" }
+  }
+}

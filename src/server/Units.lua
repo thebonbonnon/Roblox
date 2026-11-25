@@ -356,14 +356,53 @@ end
 ---------------------------------------------------------------------------
 -- Attacks & movement helpers
 ---------------------------------------------------------------------------
+-- Turns a moving unit's anchored root into a server-simulated physics body. Clients interpolate
+-- physics replication, so minions and bots glide smoothly instead of being teleported every
+-- frame, and the server only sends a new velocity when it actually changes.
+function Units.makeKinematic(u)
+	local root = u.root
+	local att = Instance.new("Attachment")
+	att.Name = "MoveAttachment"
+	att.Parent = root
+
+	local lv = Instance.new("LinearVelocity")
+	lv.Name = "Move"
+	lv.Attachment0 = att
+	lv.RelativeTo = Enum.ActuatorRelativeTo.World
+	lv.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+	-- Unlimited force: the unit moves exactly at its speed and holds its height (no gravity sag).
+	lv.MaxForce = math.huge
+	pcall(function()
+		lv.ForceLimitsEnabled = false
+	end)
+	lv.VectorVelocity = Vector3.zero
+	lv.Parent = root
+
+	local ao = Instance.new("AlignOrientation")
+	ao.Name = "Facing"
+	ao.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	ao.Attachment0 = att
+	ao.RigidityEnabled = true
+	ao.CFrame = root.CFrame.Rotation
+	ao.Parent = root
+
+	u.lv, u.ao = lv, ao
+	u.lastVel = Vector3.zero
+	u.kinematic = true
+	root.Anchored = false
+	pcall(function()
+		root:SetNetworkOwner(nil) -- the server simulates it, never a nearby player
+	end)
+end
+
 function Units.face(u, pos)
-	if not u.kinematic then
+	if not u.ao then
 		return
 	end
-	local rp = u.root.Position
-	local look = Vector3.new(pos.X, rp.Y, pos.Z)
-	if (look - rp).Magnitude > 0.1 then
-		u.root.CFrame = CFrame.lookAt(rp, look)
+	local d = flat(pos - u.root.Position)
+	if d.Magnitude > 0.1 then
+		u.ao.CFrame = CFrame.lookAt(Vector3.zero, d.Unit)
+		u.lastDir = d.Unit
 	end
 end
 
@@ -382,7 +421,7 @@ function Units.basicAttack(a, t)
 		local origin = (a.firePart or a.root).Position
 		local isTower = a.kind == "tower"
 		local color = isTower and Color3.fromRGB(255, 235, 140) or Config.TeamColors[a.team]
-		Effects.homing(origin, function()
+		Effects.homing(origin, t.model, function()
 			if Units.valid(t) then
 				return t.root.Position
 			end
@@ -398,20 +437,39 @@ function Units.basicAttack(a, t)
 	end
 end
 
--- Moves an anchored (kinematic) unit along u.moveDir. Used by minions and bot heroes.
-function Units.stepMove(u, dt)
-	local dir = u.moveDir
-	if not dir or dir.Magnitude < 0.01 then
+-- Applies u.moveDir to a kinematic unit (minions and bot heroes). Call it whenever the AI
+-- updates; the velocity persists between calls, so it doesn't need to run every frame.
+function Units.stepMove(u)
+	if not u.lv or not u.root.Parent then
 		return
 	end
+	local dir = u.moveDir or Vector3.zero
 	local speed = Units.getSpeed(u)
-	if speed <= 0 then
-		return
-	end
+	local vel = (dir.Magnitude > 0.01 and speed > 0) and dir * speed or Vector3.zero
+
+	-- Stay inside the map.
+	local p = u.root.Position
 	local limit = Config.MapHalfSize - 6
-	local np = u.root.Position + dir * speed * dt
-	np = Vector3.new(math.clamp(np.X, -limit, limit), u.rootY, math.clamp(np.Z, -limit, limit))
-	u.root.CFrame = CFrame.lookAt(np, np + dir)
+	if math.abs(p.X) > limit and p.X * vel.X > 0 then
+		vel = Vector3.new(0, 0, vel.Z)
+	end
+	if math.abs(p.Z) > limit and p.Z * vel.Z > 0 then
+		vel = Vector3.new(vel.X, 0, 0)
+	end
+	-- Gently correct any height drift.
+	local dy = u.rootY - p.Y
+	if math.abs(dy) > 0.05 then
+		vel += Vector3.new(0, math.clamp(dy * 5, -10, 10), 0)
+	end
+
+	if (vel - u.lastVel).Magnitude > 0.05 then
+		u.lv.VectorVelocity = vel
+		u.lastVel = vel
+	end
+	if dir.Magnitude > 0.01 and (not u.lastDir or (dir - u.lastDir).Magnitude > 0.05) then
+		u.ao.CFrame = CFrame.lookAt(Vector3.zero, dir)
+		u.lastDir = dir
+	end
 end
 
 return Units

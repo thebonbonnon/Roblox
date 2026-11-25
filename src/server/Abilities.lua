@@ -65,23 +65,20 @@ local function applyBuff(u, b)
 	end
 end
 
+-- Skillshot: hit detection runs on the server as pure math; clients draw the projectile.
 local function launch(u, ab, origin, dir, color)
 	local width = ab.width or 2.5
-	local p = Effects.basePart(Vector3.one * width, color, CFrame.new(origin), Enum.PartType.Ball)
 	local dmg = abilityDamage(u, ab)
 	local speed = ab.speed or 90
+	local shotId = Effects.skillshot(origin, dir, speed, ab.range, width, color)
+	local pos = origin
 	local travelled = 0
 	local hit = {}
 	local conn
 	conn = RunService.Heartbeat:Connect(function(dt)
-		if not p.Parent then
-			conn:Disconnect()
-			return
-		end
 		local step = speed * dt
 		travelled += step
-		local pos = p.Position + dir * step
-		p.CFrame = CFrame.new(pos)
+		pos += dir * step
 		for _, o in ipairs(Units.enemiesNear(u.team, pos, width, false)) do
 			if not hit[o] then
 				hit[o] = true
@@ -90,14 +87,13 @@ local function launch(u, ab, origin, dir, color)
 				Effects.flash(o.root.Position, 2.5, color, 0.25)
 				if not ab.pierce then
 					conn:Disconnect()
-					p:Destroy()
+					Effects.endShot(shotId)
 					return
 				end
 			end
 		end
 		if travelled >= ab.range then
 			conn:Disconnect()
-			p:Destroy()
 		end
 	end)
 end
@@ -148,6 +144,7 @@ executors.dash = function(u, ab, targetPos, color)
 	local dest, dir = clampToRange(u, targetPos, ab.range)
 	local destFull = Vector3.new(dest.X, origin.Y, dest.Z)
 	u.model:PivotTo(CFrame.lookAt(destFull, destFull + dir))
+	Units.face(u, u.root.Position + dir)
 	Effects.trail(origin, destFull, color)
 	if ab.damage then
 		local dmg = abilityDamage(u, ab)
@@ -187,6 +184,7 @@ executors.execute = function(u, ab, targetPos, color)
 	dir = dir.Magnitude > 0.1 and dir.Unit or Vector3.new(0, 0, -1)
 	local dest = Vector3.new(tp.X, origin.Y, tp.Z) - dir * 2.5
 	u.model:PivotTo(CFrame.lookAt(dest, dest + dir))
+	Units.face(u, u.root.Position + dir)
 	Effects.trail(origin, dest, color)
 	local dmg = abilityDamage(u, ab) + (best.maxHp - best.hp) * (ab.missingHp or 0)
 	Units.damage(best, dmg, u)

@@ -38,9 +38,9 @@ function Minions.spawn(team, lane, minionType)
 	u.minionType = minionType
 	u.path = path
 	u.wp = 2
-	u.kinematic = true
 	u.rootY = Config.GroundY + info.rootY
 	u.moveDir = Vector3.zero
+	Units.makeKinematic(u)
 	Minions.list[u] = true
 	return u
 end
@@ -130,8 +130,8 @@ function Minions.step(dt)
 		if Units.valid(u) then
 			if doThink then
 				think(u)
+				Units.stepMove(u)
 			end
-			Units.stepMove(u, dt)
 		end
 	end
 end
