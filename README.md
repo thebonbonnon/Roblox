@@ -36,7 +36,9 @@ A complete, code-only 5v5 MOBA for Roblox, written in Luau. You don't need any a
 
 ## Setup
 
-This project uses [Rojo](https://rojo.space).
+**Quickest way (no tools needed):** run `python3 tools/build_place.py`, then double-click `build/Moba.rbxlx` (or open it from Studio with *File → Open from File*) and press **Play**.
+
+**With [Rojo](https://rojo.space)** (live-syncs code changes into Studio):
 
 1. Install Rojo (e.g. `aftman add rojo-rbx/rojo` or `cargo install rojo`) and the Rojo plugin for Roblox Studio.
 2. **Option A: live sync.** Run `rojo serve` in this folder, open a new Baseplate in Studio, and click *Connect* in the Rojo plugin.
