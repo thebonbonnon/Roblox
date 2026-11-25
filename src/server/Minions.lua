@@ -9,6 +9,7 @@ local ModelFactory = require(script.Parent.ModelFactory)
 local flat = Units.flat
 local Minions = {}
 Minions.list = {}
+Minions.laneCount = {} -- [team .. lane] = alive minions
 Minions.active = false
 
 local AI_INTERVAL = 0.12
@@ -17,6 +18,10 @@ local accum = 0
 function Minions.spawn(team, lane, minionType)
 	if not Minions.active then
 		return
+	end
+	local laneKey = team .. lane
+	if (Minions.laneCount[laneKey] or 0) >= Config.MaxMinionsPerLane then
+		return -- this lane is already full; skip rather than pile up more units
 	end
 	local s = Config.Minions[minionType]
 	local path = MapData.GetLanePath(lane, team)
@@ -36,6 +41,8 @@ function Minions.spawn(team, lane, minionType)
 		speed = s.speed, radius = s.radius, ranged = s.ranged, barHeight = info.barHeight,
 	})
 	u.minionType = minionType
+	u.laneKey = laneKey
+	Minions.laneCount[laneKey] = (Minions.laneCount[laneKey] or 0) + 1
 	u.path = path
 	u.wp = 2
 	u.rootY = Config.GroundY + info.rootY
@@ -106,7 +113,7 @@ local function think(u)
 		-- Light separation from nearby allied minions so waves don't stack into one blob.
 		local push = Vector3.zero
 		for o in pairs(Minions.list) do
-			if o ~= u and o.team == u.team and o.alive then
+			if o ~= u and o.laneKey == u.laneKey and o.alive then
 				local away = pos - flat(o.root.Position)
 				local m = away.Magnitude
 				if m > 0.01 and m < 3 then
@@ -141,6 +148,9 @@ Units.onDeath(function(u)
 		return
 	end
 	Minions.list[u] = nil
+	if u.laneKey then
+		Minions.laneCount[u.laneKey] = math.max(0, (Minions.laneCount[u.laneKey] or 1) - 1)
+	end
 	Units.remove(u)
 	task.delay(0.15, function()
 		if u.model then
@@ -156,6 +166,7 @@ function Minions.clear()
 		end
 	end
 	Minions.list = {}
+	Minions.laneCount = {}
 end
 
 return Minions

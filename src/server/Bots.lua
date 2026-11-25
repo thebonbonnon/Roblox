@@ -45,18 +45,9 @@ local function dangerousTower(u, pos)
 		if t.alive and t.team ~= u.team then
 			local d = (flat(t.root.Position) - flat(pos)).Magnitude - t.radius
 			if d <= t.range + 3 then
-				-- Safe only if allied minions are tanking it and it isn't targeting us.
-				if t.target == u then
-					return t
-				end
-				local tanked = false
-				for o in pairs(Units.all) do
-					if o.kind == "minion" and o.team == u.team and o.alive and Units.edgeDist(o, t) <= t.range then
-						tanked = true
-						break
-					end
-				end
-				if not tanked then
+				-- Safe only while the tower is busy shooting one of our minions.
+				local target = t.target
+				if not (target and target.alive and target.kind == "minion") then
 					return t
 				end
 			end

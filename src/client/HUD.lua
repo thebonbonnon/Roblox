@@ -26,6 +26,7 @@ local gui
 local el = {} -- named UI elements
 local cooldownEnd, cooldownLen = {}, {}
 local movement -- client Movement module (dash charges)
+local graphics -- client Graphics module (quality + fps)
 local barTarget = { hp = 1, mana = 1 }
 local barShown = { hp = 1, mana = 1 }
 local lastHp = nil
@@ -236,6 +237,12 @@ local function buildTopBar()
 	el.gold = label({ Parent = goldBox, Position = UDim2.fromOffset(12, 4), Size = UDim2.new(1, -24, 0, 24), TextSize = 18, TextColor3 = GOLD })
 	el.kda = label({ Parent = goldBox, Position = UDim2.fromOffset(12, 28), Size = UDim2.new(1, -24, 0, 20), TextSize = 13, Font = Enum.Font.Gotham })
 
+	-- Performance readout (top-left): tells "my computer is slow" (FPS) apart from "my
+	-- connection is slow" (ping) when someone reports lag.
+	el.perf = label({
+		Parent = gui, Position = UDim2.fromOffset(12, 10), Size = UDim2.fromOffset(320, 18), TextSize = 13,
+		Font = Enum.Font.GothamMedium, TextStrokeTransparency = 0.5, RichText = true,
+	})
 	el.feed = make("Frame", {
 		Parent = gui, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 70),
 		Size = UDim2.fromOffset(320, 220), BackgroundTransparency = 1,
@@ -571,6 +578,19 @@ local function update()
 		el.heroSelect.Visible = false
 	end
 
+	-- FPS / ping
+	if graphics then
+		local fps = math.floor(graphics.fps() + 0.5)
+		local ping = math.floor(player:GetNetworkPing() * 1000 + 0.5)
+		local function tone(good, bad, v, invert)
+			local ok = invert and v >= good or (not invert and v <= good)
+			local poor = invert and v < bad or (not invert and v > bad)
+			return poor and "#ff6b6b" or (ok and "#8be28b" or "#ffd36b")
+		end
+		el.perf.Text = string.format('<font color="%s">%d FPS</font>  ·  <font color="%s">%d ms ping</font>  ·  Graphics %s [G]',
+			tone(50, 30, fps, true), fps, tone(120, 250, ping, false), ping, graphics.level)
+	end
+
 	-- Score / clock
 	local state = ReplicatedStorage:FindFirstChild("MatchState")
 	if state then
@@ -671,6 +691,7 @@ end
 function HUD.init(ctx)
 	remotes = ctx.remotes
 	movement = ctx.movement
+	graphics = ctx.graphics
 	player.CharacterAdded:Connect(function()
 		killedBy, lastHp = nil, nil
 	end)
@@ -700,6 +721,10 @@ end
 function HUD.setCooldown(slot, duration)
 	cooldownEnd[slot] = os.clock() + duration
 	cooldownLen[slot] = duration
+end
+
+function HUD.isReady(slot)
+	return (cooldownEnd[slot] or 0) <= os.clock()
 end
 
 function HUD.menuOpen()
@@ -798,8 +823,9 @@ function HUD.notify(kind, ...)
 		el.subBanner.Text = string.format("%s team destroyed the nexus. New match in %ds.", winner, Config.RestartDelay)
 		bannerUntil = os.clock() + Config.RestartDelay
 	elseif kind == "msg" then
-		local text = ...
+		local text, color = ...
 		el.toast.Text = text
+		el.toast.TextColor3 = color or Color3.fromRGB(255, 120, 120)
 		local stamp = os.clock()
 		task.delay(2.5, function()
 			if el.toast.Text == text and os.clock() - stamp >= 2.4 then

@@ -537,6 +537,7 @@ Config.ShopRadius = 32
 Config.FirstWaveDelay = 8
 Config.WaveInterval = 30
 Config.SiegeEvery = 3
+Config.MaxMinionsPerLane = 14 -- per team per lane; stops unpushed waves piling up (big lag source)
 Config.MinionAggro = 16
 Config.MinionLeash = 26
 Config.Minions = {

@@ -14,6 +14,25 @@ local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Co
 
 local FX = {}
 
+-- Quality: on "Low", fewer particles, no dynamic lights, and a tighter effects budget.
+local low = false
+function FX.setQuality(level)
+	low = level == "Low"
+end
+
+-- Particle budget (bursts per second) so huge team fights can't tank the frame rate.
+local budget, budgetAt = 40, os.clock()
+local function spend()
+	local now = os.clock()
+	budget = math.min(low and 15 or 40, budget + (now - budgetAt) * (low and 15 or 40))
+	budgetAt = now
+	if budget < 1 then
+		return false
+	end
+	budget -= 1
+	return true
+end
+
 local camera = workspace.CurrentCamera
 
 local TEX = {
@@ -59,6 +78,9 @@ local function part(size, color, cframe, shape, material)
 end
 
 local function glow(p, color, range, brightness)
+	if low then
+		return nil
+	end
 	local light = Instance.new("PointLight")
 	light.Color = color
 	light.Range = range
@@ -88,6 +110,9 @@ end
 
 -- Particle burst at a position.
 local function burst(pos, color, opts)
+	if (camera.CFrame.Position - pos).Magnitude > (low and 70 or 140) or not spend() then
+		return
+	end
 	local holder = part(Vector3.one * 0.1, color, CFrame.new(pos))
 	holder.Transparency = 1
 	local att = Instance.new("Attachment")
@@ -108,7 +133,7 @@ local function burst(pos, color, opts)
 	e.Rotation = NumberRange.new(0, 360)
 	e.Enabled = false
 	e.Parent = att
-	e:Emit(opts.count or 16)
+	e:Emit(math.max(1, math.floor((opts.count or 16) * (low and 0.4 or 1))))
 	Debris:AddItem(holder, (opts.life or 0.35) * 2 + 0.2)
 end
 
@@ -126,10 +151,15 @@ end
 
 -- A bright light that fades out (impacts and explosions light up the scene).
 local function lightFlash(pos, color, range, duration)
+	if low then
+		return
+	end
 	local p = part(Vector3.one * 0.1, color, CFrame.new(pos))
 	p.Transparency = 1
 	local light = glow(p, color, range, 6)
-	TweenService:Create(light, TweenInfo.new(duration), { Brightness = 0 }):Play()
+	if light then
+		TweenService:Create(light, TweenInfo.new(duration), { Brightness = 0 }):Play()
+	end
 	Debris:AddItem(p, duration + 0.1)
 end
 
@@ -250,13 +280,18 @@ function handlers.trail(a, b, color)
 	end
 end
 
-function handlers.homing(fromPos, targetModel, speed, color, size)
+function handlers.homing(fromPos, targetModel, speed, color, size, minor)
+	if minor and (low or (camera.CFrame.Position - fromPos).Magnitude > 120) then
+		return -- distant / low-quality minion skirmish: skip the visual entirely
+	end
 	local p = part(Vector3.one * size, color, CFrame.new(fromPos), Enum.PartType.Ball)
-	glow(p, color, size * 6)
-	withTrail(p, color, size * 0.9)
-	burst(fromPos, color, { count = 6, speed = 10, size = size * 0.6, life = 0.15 })
-	FX.sound("shot", fromPos)
-	table.insert(homing, { part = p, model = targetModel, lastPos = nil, speed = speed, born = os.clock(), color = color, size = size })
+	if not minor then
+		glow(p, color, size * 6)
+		withTrail(p, color, size * 0.9)
+		burst(fromPos, color, { count = 6, speed = 10, size = size * 0.6, life = 0.15 })
+		FX.sound("shot", fromPos)
+	end
+	table.insert(homing, { part = p, model = targetModel, lastPos = nil, speed = speed, born = os.clock(), color = color, size = size, minor = minor })
 end
 
 function handlers.shot(id, origin, dir, speed, range, width, color)
@@ -329,7 +364,9 @@ RunService.RenderStepped:Connect(function(dt)
 			local step = h.speed * dt
 			if delta.Magnitude <= step + 0.5 then
 				done = true
-				impact(target, h.color, h.size > 1)
+				if not h.minor then
+					impact(target, h.color, h.size > 1)
+				end
 			else
 				h.part.CFrame = CFrame.new(h.part.Position + delta.Unit * step)
 			end

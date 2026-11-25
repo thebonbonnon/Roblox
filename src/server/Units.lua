@@ -450,6 +450,9 @@ function Units.basicAttack(a, t)
 		a.anim.attack(a.ranged and "lunge" or "slash")
 	end
 	local dmg = Units.getDamage(a)
+	-- Minion-on-minion fights are background noise: draw them cheaply (or not at all) to save
+	-- network traffic and frame rate.
+	local minor = a.kind == "minion" and t.kind == "minion"
 	if a.ranged then
 		local origin = (a.firePart or a.root).Position
 		local isTower = a.kind == "tower"
@@ -463,9 +466,11 @@ function Units.basicAttack(a, t)
 			if Units.valid(t) then
 				Units.damage(t, dmg, a)
 			end
-		end)
+		end, minor)
 	else
-		Effects.flash(t.root.Position, 1.4, Color3.new(1, 1, 1), 0.15)
+		if not minor then
+			Effects.flash(t.root.Position, 1.4, Color3.new(1, 1, 1), 0.15)
+		end
 		Units.damage(t, dmg, a)
 	end
 end

@@ -42,6 +42,7 @@ A complete, code-only first-person 6v6 MOBA for Roblox, written in Luau. You don
 | Q, E, F, R | Abilities, aimed at the crosshair (R unlocks at level 6) |
 | B | Shop (frees the mouse) |
 | Tab (hold) | Scoreboard |
+| G | Switch graphics High / Low |
 
 ## Setup
 
@@ -137,5 +138,6 @@ Add an entry to `Heroes.Defs` in `src/shared/Heroes.lua` and append its id to `H
 - The server is authoritative for all health, damage, cooldowns, gold and shop purchases. Clients only send intents (move target, cast at point, buy).
 - **Smooth movement:** minions and bots are server-simulated physics bodies moved by velocity (`LinearVelocity` + `AlignOrientation`). Roblox interpolates physics on every client, so they glide smoothly even on slow connections. The server only sends a new velocity when a unit changes direction or speed.
 - **Client-side effects:** projectiles, skillshots, spell telegraphs, flashes and dash trails are drawn by each client (`src/client/FX.lua`) from one small message each. Hit timing and damage stay on the server.
+- **Lag handling:** the top-left of the screen shows FPS and ping. Low FPS means the computer is struggling: the game drops to Low graphics automatically (no shadows, lamp lights, bloom or sun rays, fewer particles), or press **G**. High ping means a slow connection: shots and abilities still react instantly on screen, while the server decides hits. The server caps minions per lane (`Config.MaxMinionsPerLane`) and doesn't send minion-vs-minion hit effects at all.
 - **No snagging:** moving units are in their own collision group, so they never get stuck on towers, trees or players.
 - Ideas: jungle camps, more heroes and items, recall (B-to-base), fog of war, ranked matchmaking with a lobby place and `TeleportService`.

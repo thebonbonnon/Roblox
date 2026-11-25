@@ -38,8 +38,9 @@ end
 
 -- Homing projectile (basic attacks). The server tracks its flight to time the hit; clients draw
 -- a ball that follows `targetModel`.
-function Effects.homing(fromPos, targetModel, getTargetPos, speed, color, size, onHit)
-	send("homing", fromPos, targetModel, speed, color, size)
+-- `minor` marks background shots (minion vs minion) that clients draw as cheaply as possible.
+function Effects.homing(fromPos, targetModel, getTargetPos, speed, color, size, onHit, minor)
+	send("homing", fromPos, targetModel, speed, color, size, minor)
 	local pos = fromPos
 	local started = os.clock()
 	local conn

@@ -16,6 +16,8 @@ local HUD = require(script.Parent:WaitForChild("HUD"))
 local FX = require(script.Parent:WaitForChild("FX"))
 local Viewmodel = require(script.Parent:WaitForChild("Viewmodel"))
 local Movement = require(script.Parent:WaitForChild("Movement"))
+local Graphics = require(script.Parent:WaitForChild("Graphics"))
+local HeroDefs = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Heroes"))
 
 local camera = workspace.CurrentCamera
 
@@ -29,7 +31,16 @@ for _, coreType in ipairs({ Enum.CoreGuiType.Health, Enum.CoreGuiType.Backpack, 
 	end)
 end
 
-HUD.init({ remotes = Remotes, movement = Movement })
+HUD.init({ remotes = Remotes, movement = Movement, graphics = Graphics })
+Graphics.onChanged(function(level, reason)
+	FX.setQuality(level)
+	if reason == "auto" then
+		HUD.notify("msg", "Switched to low graphics for a smoother game (press G to change)", Color3.fromRGB(140, 220, 255))
+	else
+		HUD.notify("msg", "Graphics: " .. level .. " (press G to change)", Color3.fromRGB(140, 220, 255))
+	end
+end)
+Graphics.init()
 Viewmodel.init()
 local fovKick = 0
 Movement.init({
@@ -80,15 +91,27 @@ local function aim()
 	return cf.LookVector, result and result.Position or (cf.Position + cf.LookVector * 200)
 end
 
+-- Attacks react instantly on your screen (kick, crosshair) instead of waiting a round trip to
+-- the server; the server still decides hits and damage. The attack interval is learned from
+-- the server's confirmations (it changes with items and buffs).
+local attackInterval = nil
+local nextShot = 0
 local function tryFire()
 	if not alive() or HUD.menuOpen() then
 		return
 	end
 	local now = os.clock()
-	if now - lastFire < 0.08 then
-		return -- the server enforces the real attack speed
+	if not attackInterval then
+		local def = HeroDefs.Defs[player:GetAttribute("HeroId") or ""]
+		attackInterval = def and def.attackCd or 1
 	end
+	if now < nextShot then
+		return
+	end
+	nextShot = now + attackInterval * 0.97
 	lastFire = now
+	Viewmodel.kick(1)
+	HUD.attackPulse()
 	Remotes.Fire:FireServer((aim()))
 end
 
@@ -98,6 +121,10 @@ local function cast(slot)
 	end
 	local _, point = aim()
 	Remotes.CastAbility:FireServer(slot, point)
+	if HUD.isReady(slot) then
+		Viewmodel.kick(0.8) -- instant feedback; the server confirms the cooldown
+		FX.shake(0.12)
+	end
 end
 
 UserInputService.InputBegan:Connect(function(input, processed)
@@ -140,6 +167,7 @@ end)
 
 player.CharacterAdded:Connect(function()
 	firing, zooming = false, false
+	attackInterval = nil
 end)
 
 ---------------------------------------------------------------------------
@@ -147,12 +175,9 @@ end)
 ---------------------------------------------------------------------------
 Remotes.Cooldown.OnClientEvent:Connect(function(slot, duration)
 	if slot == "Attack" then
-		Viewmodel.kick(1)
-		HUD.attackPulse()
+		attackInterval = duration -- keep the local fire rate in sync with the server
 	else
 		HUD.setCooldown(slot, duration)
-		Viewmodel.kick(0.8) -- the server confirmed the cast
-		FX.shake(0.12)
 	end
 end)
 
