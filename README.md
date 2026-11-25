@@ -5,7 +5,9 @@ A complete, code-only first-person 6v6 MOBA for Roblox, written in Luau. You don
 ## Features
 
 - **First-person combat:** aim with the crosshair, shoot or swing with left click, zoom with right click, and cast abilities at what you aim at. You see your hero's own arms and weapon on screen.
-- **6v6 teams** (Blue vs Red). Players are auto-balanced, and empty slots are filled with **AI bot heroes** that lane, last-hit, trade, use abilities, respect tower range, retreat to heal and buy items. A bot steps aside when a player joins.
+- **Hero-shooter movement:** dash, double jump and slide, with screen shake, FOV kick and particle effects.
+- **Polished look:** terrain with grass, sand lanes and a wadeable river, golden-hour lighting with haze, bloom, color grading and sun rays, lane lamps, rocks and bushes. Every ability has particle bursts, glowing trails, explosions, shockwaves and sounds. The HUD has a crosshair with hit markers, a damage flash, smooth bars, ability-ready glows and kill-streak banners.
+- **6v6 teams** (Blue vs Red). Players are auto-balanced, and empty slots are filled with **AI bot heroes** that lane, last-hit, trade, use abilities, respect tower range, retreat to heal and buy items. A bot steps aside when a player joins. Bots deal 55% damage so they're beatable (`Config.BotDamageMult`).
 - **Three-lane map** (Top / Mid / Bot) with a river, jungle trees, bases and fountains.
 - **Towers**: 2 per lane per team. An inner tower can't be damaged until the outer tower in its lane falls. Towers target minions first and switch to any enemy hero that attacks one of your heroes.
 - **Nexus**: can be damaged once any of its team's inner towers is down. Destroy it to win. A new match starts automatically.
@@ -31,7 +33,9 @@ A complete, code-only first-person 6v6 MOBA for Roblox, written in Luau. You don
 | Input | Action |
 |---|---|
 | W A S D | Move |
-| Space | Jump |
+| Space | Jump (press again in the air to double jump) |
+| Shift | Dash (2 charges, shown under the crosshair) |
+| Ctrl or C | Slide while running |
 | Mouse | Aim |
 | Left click (hold) | Shoot / swing at the crosshair |
 | Right click (hold) | Zoom in |
@@ -116,7 +120,9 @@ src/
   client/          -> StarterPlayerScripts.Client
     Main.client.lua  camera, input, click-to-move
     HUD.lua          all UI
-    FX.lua           draws projectiles, spell rings, flashes and dash trails locally
+    FX.lua           particles, explosions, trails, shockwaves, screen shake and sounds (all local)
+    Movement.lua     dash, double jump and slide
+    Viewmodel.lua    your hero's arms and weapon in first person
 plugin/
   src/init.server.lua   MOBA Model Kit Studio plugin
   MobaModelKit.rbxmx    ready-to-install plugin (built by tools/build_plugin.py)

@@ -1,6 +1,7 @@
 --[[
 	MOBA client controller, first person:
-	  WASD move, Space jump, mouse aim, Left click shoot / swing, Right click zoom,
+	  WASD move, Space jump (again in the air to double jump), Shift dash, Ctrl/C slide,
+	  mouse aim, Left click shoot / swing, Right click zoom,
 	  Q E F R abilities (fired at what the crosshair points at), B shop, Tab scores.
 ]]
 local Players = game:GetService("Players")
@@ -14,6 +15,7 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local HUD = require(script.Parent:WaitForChild("HUD"))
 local FX = require(script.Parent:WaitForChild("FX"))
 local Viewmodel = require(script.Parent:WaitForChild("Viewmodel"))
+local Movement = require(script.Parent:WaitForChild("Movement"))
 
 local camera = workspace.CurrentCamera
 
@@ -27,8 +29,25 @@ for _, coreType in ipairs({ Enum.CoreGuiType.Health, Enum.CoreGuiType.Backpack, 
 	end)
 end
 
-HUD.init({ remotes = Remotes })
+HUD.init({ remotes = Remotes, movement = Movement })
 Viewmodel.init()
+local fovKick = 0
+Movement.init({
+	blocked = function()
+		return HUD.menuOpen()
+	end,
+	onDash = function(pos, dir)
+		FX.dash(pos, dir)
+		fovKick = 14
+	end,
+	onDoubleJump = function(pos)
+		FX.jump(pos)
+	end,
+	onSlide = function(pos)
+		FX.slide(pos)
+		fovKick = 8
+	end,
+})
 
 -- Ability keys. Slots keep their internal names (Q/W/E/R); W is "walk forward" in an FPS,
 -- so the second ability lives on E and the third on F.
@@ -79,7 +98,6 @@ local function cast(slot)
 	end
 	local _, point = aim()
 	Remotes.CastAbility:FireServer(slot, point)
-	Viewmodel.kick(0.6)
 end
 
 UserInputService.InputBegan:Connect(function(input, processed)
@@ -114,7 +132,8 @@ RunService.RenderStepped:Connect(function(dt)
 	if firing then
 		tryFire()
 	end
-	local target = (zooming and alive() and not HUD.menuOpen()) and ZOOM_FOV or BASE_FOV
+	fovKick *= math.exp(-dt * 6)
+	local target = ((zooming and alive() and not HUD.menuOpen()) and ZOOM_FOV or BASE_FOV) + fovKick
 	camera.FieldOfView += (target - camera.FieldOfView) * math.min(1, dt * 12)
 	Viewmodel.setHidden(HUD.menuOpen() or zooming)
 end)
@@ -132,6 +151,8 @@ Remotes.Cooldown.OnClientEvent:Connect(function(slot, duration)
 		HUD.attackPulse()
 	else
 		HUD.setCooldown(slot, duration)
+		Viewmodel.kick(0.8) -- the server confirmed the cast
+		FX.shake(0.12)
 	end
 end)
 

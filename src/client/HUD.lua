@@ -25,6 +25,12 @@ local remotes
 local gui
 local el = {} -- named UI elements
 local cooldownEnd, cooldownLen = {}, {}
+local movement -- client Movement module (dash charges)
+local barTarget = { hp = 1, mana = 1 }
+local barShown = { hp = 1, mana = 1 }
+local lastHp = nil
+local killedBy = nil
+local streak, streakUntil = 0, 0
 local bannerUntil = 0
 
 local DARK = Color3.fromRGB(20, 22, 28)
@@ -179,7 +185,10 @@ local function buildBottomPanel()
 		box.MouseLeave:Connect(function()
 			el.tooltip.Visible = false
 		end)
-		el.slots[slot] = { box = box, name = name, key = key, cost = cost, overlay = overlay, cdText = cdText, lock = lock }
+		local ready = make("Frame", {
+			Parent = box, Size = UDim2.fromScale(1, 1), BackgroundColor3 = GOLD, BackgroundTransparency = 1, ZIndex = 6,
+		}, { corner(8) })
+		el.slots[slot] = { box = box, name = name, key = key, cost = cost, overlay = overlay, cdText = cdText, lock = lock, ready = ready }
 	end
 
 	-- Items and stats on the right
@@ -389,6 +398,33 @@ local function buildCrosshair()
 		})
 	end
 	el.hitmarker = hit
+
+	-- Dash charges under the crosshair.
+	el.dashPips = {}
+	for i = 1, 2 do
+		local pip = make("Frame", {
+			Parent = holder, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, (i - 1.5) * 16, 0.5, 22),
+			Size = UDim2.fromOffset(12, 3), BorderSizePixel = 0, BackgroundColor3 = Color3.fromRGB(60, 60, 70), BackgroundTransparency = 0.3,
+		}, { corner(2) })
+		local fill = make("Frame", { Parent = pip, Size = UDim2.fromScale(1, 1), BorderSizePixel = 0, BackgroundColor3 = Color3.fromRGB(140, 220, 255) }, { corner(2) })
+		el.dashPips[i] = fill
+	end
+
+	-- Red screen flash when you take damage.
+	el.vignette = make("Frame", {
+		Parent = gui, Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(200, 20, 20), BackgroundTransparency = 1, ZIndex = 0,
+	}, {
+		make("UIGradient", {
+			Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.3, 0.85), NumberSequenceKeypoint.new(0.7, 0.85), NumberSequenceKeypoint.new(1, 0) }),
+		}),
+	})
+
+	-- Kill banner ("ELIMINATED", streaks).
+	el.killBanner = label({
+		Parent = gui, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.38), Size = UDim2.fromOffset(600, 40),
+		TextXAlignment = Enum.TextXAlignment.Center, TextSize = 30, Font = Enum.Font.GothamBlack, TextStrokeTransparency = 0.3,
+		TextTransparency = 1, TextStrokeColor3 = Color3.new(0, 0, 0), Text = "",
+	}, { make("UIScale", { Scale = 1 }) })
 end
 
 local function updateCrosshair(dt)
@@ -398,6 +434,18 @@ local function updateCrosshair(dt)
 		b.frame.Position = UDim2.new(0.5, b.dir[1] * gap, 0.5, b.dir[2] * gap)
 	end
 	el.hitmarker.Visible = os.clock() < hitUntil
+	if movement then
+		local charges, _, progress = movement.charges()
+		for i, fill in ipairs(el.dashPips) do
+			local amount = i <= charges and 1 or (i == charges + 1 and progress or 0)
+			fill.Size = UDim2.fromScale(amount, 1)
+			fill.BackgroundTransparency = i <= charges and 0 or 0.5
+		end
+	end
+	for key, fill in pairs({ hp = el.hpFill, mana = el.manaFill }) do
+		barShown[key] += (barTarget[key] - barShown[key]) * math.min(1, dt * 10)
+		fill.Size = UDim2.fromScale(barShown[key], 1)
+	end
 	local char = player.Character
 	local alive = char and (char:GetAttribute("Health") or 0) > 0
 	el.crosshair.Visible = alive and player:GetAttribute("HeroId") ~= nil and not HUD.menuOpen()
@@ -549,9 +597,13 @@ local function update()
 		local maxHp = char and char:GetAttribute("MaxHealth") or 1
 		local mana = char and char:GetAttribute("Mana") or 0
 		local maxMana = char and char:GetAttribute("MaxMana") or 1
-		el.hpFill.Size = UDim2.fromScale(math.clamp(hp / maxHp, 0, 1), 1)
+		barTarget.hp = math.clamp(hp / maxHp, 0, 1)
+		if lastHp and hp < lastHp - 1 and hp > 0 then
+			HUD.hurt(math.clamp((lastHp - hp) / maxHp * 4, 0.25, 1))
+		end
+		lastHp = hp
 		el.hpText.Text = string.format("%d / %d", hp, maxHp)
-		el.manaFill.Size = UDim2.fromScale(math.clamp(mana / maxMana, 0, 1), 1)
+		barTarget.mana = math.clamp(mana / maxMana, 0, 1)
 		el.manaText.Text = string.format("%d / %d", mana, maxMana)
 
 		local clock = os.clock()
@@ -564,9 +616,16 @@ local function update()
 			if remaining > 0 then
 				s.overlay.Size = UDim2.fromScale(1, remaining / (cooldownLen[slot] or 1))
 				s.cdText.Text = remaining >= 1 and tostring(math.ceil(remaining)) or string.format("%.1f", remaining)
+				s.wasCooling = true
 			else
 				s.overlay.Size = UDim2.fromScale(1, 0)
 				s.cdText.Text = ""
+				if s.wasCooling then
+					-- Ability is ready again: quick gold glow.
+					s.wasCooling = false
+					s.ready.BackgroundTransparency = 0.35
+					TweenService:Create(s.ready, TweenInfo.new(0.45), { BackgroundTransparency = 1 }):Play()
+				end
 			end
 			s.lock.Visible = slot == "R" and level < Config.UltLevel
 			s.box.BackgroundColor3 = mana < ab.mana and Color3.fromRGB(40, 45, 80) or Color3.fromRGB(55, 60, 78)
@@ -587,7 +646,7 @@ local function update()
 			if respawnAt > now and hp <= 0 then
 				el.banner.Text = "YOU DIED"
 				el.banner.TextColor3 = Color3.fromRGB(230, 80, 80)
-				el.subBanner.Text = "Respawning in " .. math.ceil(respawnAt - now) .. "s"
+				el.subBanner.Text = (killedBy and ("Eliminated by " .. killedBy .. "  ·  ") or "") .. "Respawning in " .. math.ceil(respawnAt - now) .. "s"
 			else
 				el.banner.Text = ""
 				el.subBanner.Text = ""
@@ -611,6 +670,10 @@ end
 ---------------------------------------------------------------------------
 function HUD.init(ctx)
 	remotes = ctx.remotes
+	movement = ctx.movement
+	player.CharacterAdded:Connect(function()
+		killedBy, lastHp = nil, nil
+	end)
 	gui = make("ScreenGui", {
 		Name = "MobaHUD", ResetOnSpawn = false, IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 		Parent = player:WaitForChild("PlayerGui"),
@@ -656,6 +719,27 @@ function HUD.hitmarker(heroVsHero)
 	end
 end
 
+function HUD.hurt(amount)
+	el.vignette.BackgroundTransparency = 1 - 0.55 * amount
+	TweenService:Create(el.vignette, TweenInfo.new(0.5, Enum.EasingStyle.Quad), { BackgroundTransparency = 1 }):Play()
+end
+
+function HUD.killBanner(text, color)
+	local b = el.killBanner
+	b.Text = text
+	b.TextColor3 = color
+	b.TextTransparency = 0
+	b.TextStrokeTransparency = 0.3
+	local scale = b:FindFirstChildOfClass("UIScale")
+	scale.Scale = 1.6
+	TweenService:Create(scale, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	task.delay(1.6, function()
+		if b.Text == text then
+			TweenService:Create(b, TweenInfo.new(0.4), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+		end
+	end)
+end
+
 function HUD.toggleShop()
 	el.shop.Visible = not el.shop.Visible
 end
@@ -691,8 +775,18 @@ end
 function HUD.notify(kind, ...)
 	if kind == "kill" then
 		local killer, killerTeam, victim, victimTeam = ...
-		local _ = victimTeam
 		feedLine(string.format("%s  killed  %s", killer, victim), Config.TeamColors[killerTeam])
+		local me = player.DisplayName
+		if killer == me and killerTeam == myTeam() then
+			local now = os.clock()
+			streak = now < streakUntil and streak + 1 or 1
+			streakUntil = now + 10
+			local names = { [2] = "DOUBLE KILL", [3] = "TRIPLE KILL", [4] = "QUADRA KILL" }
+			HUD.killBanner(streak >= 5 and "RAMPAGE" or names[streak] or ("ELIMINATED  " .. string.upper(victim)), streak >= 2 and GOLD or WHITE)
+		elseif victim == me and victimTeam == myTeam() then
+			killedBy = killer
+			streak = 0
+		end
 	elseif kind == "tower" then
 		local team, lane = ...
 		feedLine(string.format("%s %s tower destroyed!", team, lane or ""), Config.TeamColors[team == "Blue" and "Red" or "Blue"])

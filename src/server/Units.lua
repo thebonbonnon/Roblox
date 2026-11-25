@@ -328,6 +328,9 @@ function Units.damage(target, amount, source)
 	if not Units.valid(target) or Units.isInvulnerable(target) or amount <= 0 then
 		return 0
 	end
+	if source and source.isBot then
+		amount *= Config.BotDamageMult
+	end
 	local dealt = amount * 100 / (100 + math.max(0, Units.getArmor(target)))
 	target.hp -= dealt
 

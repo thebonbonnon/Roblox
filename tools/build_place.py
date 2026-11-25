@@ -80,6 +80,8 @@ def main():
             item("StarterPlayerScripts", "StarterPlayerScripts", children=[folder_item(os.path.join(src, "client"), "Client")]),
         ]),
         item("Players", "Players", extra='<bool name="CharacterAutoLoads">false</bool>'),
+        # Future lighting: realistic shadows and light from neon parts and lamps.
+        item("Lighting", "Lighting", extra='<token name="Technology">4</token>'),
         "</roblox>\n",
     ])
     os.makedirs(os.path.dirname(OUT), exist_ok=True)

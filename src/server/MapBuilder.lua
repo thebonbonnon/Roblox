@@ -8,9 +8,6 @@ local ModelFactory = require(script.Parent.ModelFactory)
 
 local MapBuilder = {}
 
-local GRASS = Color3.fromRGB(78, 130, 62)
-local LANE = Color3.fromRGB(196, 170, 120)
-local RIVER = Color3.fromRGB(70, 140, 190)
 
 local function make(className, props, parent)
 	local inst = Instance.new(className)
@@ -48,6 +45,88 @@ local function tree(parent, pos, rng)
 	model.Parent = parent
 end
 
+local function lamp(parent, pos)
+	local gy = Config.GroundY
+	make("Part", {
+		Name = "LampPost", Shape = Enum.PartType.Cylinder, Size = Vector3.new(7, 0.45, 0.45),
+		CFrame = CFrame.new(pos.X, gy + 3.5, pos.Z) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = Color3.fromRGB(45, 45, 52), Material = Enum.Material.Metal,
+	}, parent)
+	make("Part", {
+		Name = "LampBase", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 1.4, 1.4),
+		CFrame = CFrame.new(pos.X, gy + 0.3, pos.Z) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = Color3.fromRGB(45, 45, 52), Material = Enum.Material.Metal,
+	}, parent)
+	local glowPart = make("Part", {
+		Name = "Lantern", Shape = Enum.PartType.Ball, Size = Vector3.one * 1.1,
+		CFrame = CFrame.new(pos.X, gy + 7.3, pos.Z), Color = Color3.fromRGB(255, 200, 120),
+		Material = Enum.Material.Neon, CanCollide = false,
+	}, parent)
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(255, 190, 120)
+	light.Range = 20
+	light.Brightness = 1.4
+	light.Shadows = false
+	light.Parent = glowPart
+end
+
+local function rocks(parent, pos, rng)
+	for _ = 1, rng:NextInteger(1, 3) do
+		local d = rng:NextNumber(1.8, 4.5)
+		make("Part", {
+			Name = "Rock", Shape = Enum.PartType.Ball, Size = Vector3.one * d,
+			CFrame = CFrame.new(pos.X + rng:NextNumber(-2, 2), Config.GroundY + d * 0.2, pos.Z + rng:NextNumber(-2, 2)),
+			Color = Color3.fromRGB(rng:NextInteger(105, 130), rng:NextInteger(105, 125), rng:NextInteger(110, 130)),
+			Material = Enum.Material.Slate,
+		}, parent)
+	end
+end
+
+local function bush(parent, pos, rng)
+	for i = 1, 3 do
+		local d = rng:NextNumber(2, 3.4)
+		make("Part", {
+			Name = "Bush", Shape = Enum.PartType.Ball, Size = Vector3.one * d,
+			CFrame = CFrame.new(pos.X + (i - 2) * 1.2, Config.GroundY + d * 0.35, pos.Z + rng:NextNumber(-0.8, 0.8)),
+			Color = Color3.fromRGB(rng:NextInteger(40, 60), rng:NextInteger(105, 135), rng:NextInteger(45, 60)),
+			Material = Enum.Material.Grass, CanCollide = false,
+		}, parent)
+	end
+end
+
+-- Golden-hour lighting with haze, bloom (so neon glows), color grading and sun rays.
+local function setupLighting()
+	Lighting.ClockTime = 16.3
+	Lighting.GeographicLatitude = 35
+	Lighting.Brightness = 2.6
+	Lighting.EnvironmentDiffuseScale = 1
+	Lighting.EnvironmentSpecularScale = 1
+	Lighting.Ambient = Color3.fromRGB(40, 40, 52)
+	Lighting.OutdoorAmbient = Color3.fromRGB(125, 122, 135)
+	Lighting.ShadowSoftness = 0.2
+	Lighting.GlobalShadows = true
+	for _, child in ipairs(Lighting:GetChildren()) do
+		if child:GetAttribute("MobaLighting") then
+			child:Destroy()
+		end
+	end
+	local function effect(className, props)
+		local e = Instance.new(className)
+		for k, v in pairs(props) do
+			e[k] = v
+		end
+		e:SetAttribute("MobaLighting", true)
+		e.Parent = Lighting
+	end
+	effect("Atmosphere", { Density = 0.3, Offset = 0.25, Color = Color3.fromRGB(205, 192, 172), Decay = Color3.fromRGB(110, 118, 150), Glare = 0.35, Haze = 1.4 })
+	effect("BloomEffect", { Intensity = 0.6, Size = 28, Threshold = 1.4 })
+	effect("ColorCorrectionEffect", { Brightness = 0.02, Contrast = 0.12, Saturation = 0.15, TintColor = Color3.fromRGB(255, 247, 238) })
+	effect("SunRaysEffect", { Intensity = 0.07, Spread = 0.8 })
+	if not Lighting:FindFirstChildOfClass("Sky") then
+		effect("Sky", { SunAngularSize = 14 })
+	end
+end
+
 function MapBuilder.build()
 	MapBuilder.clear()
 	local half = MapData.HalfSize
@@ -56,49 +135,36 @@ function MapBuilder.build()
 	local map = Instance.new("Folder")
 	map.Name = "Map"
 
-	make("Part", {
-		Name = "Ground",
-		Size = Vector3.new(half * 2, 4, half * 2),
-		CFrame = CFrame.new(0, gy - 2, 0),
-		Color = GRASS,
-		Material = Enum.Material.Grass,
-	}, map)
-
-	-- River along the anti-diagonal (cuts all three lanes)
-	make("Part", {
-		Name = "River",
-		Size = Vector3.new(half * 2 * 1.40, 0.1, 26),
-		CFrame = CFrame.new(0, gy + 0.03, 0) * CFrame.Angles(0, -math.pi / 4, 0),
-		Color = RIVER,
-		Material = Enum.Material.Glass,
-		Transparency = 0.15,
-		CanCollide = false,
-	}, map)
-
-	-- Lanes
+	-- Terrain: grass field, sand lanes, a shallow river you can wade across, stone bases.
+	local terrain = workspace.Terrain
+	terrain:FillBlock(CFrame.new(0, gy - 6, 0), Vector3.new(half * 2, 12, half * 2), Enum.Material.Grass)
 	local w = MapData.LaneWidth
-	for laneName, path in pairs(MapData.Lanes) do
+	for _, path in pairs(MapData.Lanes) do
 		for i = 1, #path - 1 do
 			local a, b = path[i], path[i + 1]
 			local mid = (a + b) / 2
-			make("Part", {
-				Name = laneName .. "Lane",
-				Size = Vector3.new(w, 0.14, (b - a).Magnitude + w),
-				CFrame = CFrame.lookAt(Vector3.new(mid.X, gy + 0.07, mid.Z), Vector3.new(b.X, gy + 0.07, b.Z)),
-				Color = LANE,
-				Material = Enum.Material.Sand,
-				CanCollide = false,
-			}, map)
+			local cf = CFrame.lookAt(Vector3.new(mid.X, gy - 2, mid.Z), Vector3.new(b.X, gy - 2, b.Z))
+			terrain:FillBlock(cf, Vector3.new(w, 4, (b - a).Magnitude + w), Enum.Material.Sand)
 		end
 	end
+	local riverCF = CFrame.new(0, gy, 0) * CFrame.Angles(0, -math.pi / 4, 0)
+	terrain:FillBlock(riverCF * CFrame.new(0, -2, 0), Vector3.new(half * 2 * 1.4, 4, 26), Enum.Material.Air)
+	terrain:FillBlock(riverCF * CFrame.new(0, -3, 0), Vector3.new(half * 2 * 1.4, 2, 30), Enum.Material.Mud)
+	terrain:FillBlock(riverCF * CFrame.new(0, -1.25, 0), Vector3.new(half * 2 * 1.4, 1.5, 26), Enum.Material.Water)
+	for _, team in ipairs(Config.TeamNames) do
+		local center = MapData.Nexus[team]:Lerp(MapData.Fountain[team], 0.4)
+		terrain:FillCylinder(CFrame.new(center.X, gy - 2, center.Z), 4, 60, Enum.Material.Slate)
+	end
+	terrain.WaterColor = Color3.fromRGB(56, 128, 160)
+	terrain.WaterTransparency = 0.55
+	terrain.WaterReflectance = 0.6
+	terrain.WaterWaveSize = 0.08
+	terrain.WaterWaveSpeed = 6
 
 	-- Bases and fountains
 	for _, team in ipairs(Config.TeamNames) do
 		local color = Config.TeamColors[team]
-		local nexus = MapData.Nexus[team]
 		local fountain = MapData.Fountain[team]
-		local baseCenter = nexus:Lerp(fountain, 0.4)
-		disc(map, team .. "Base", baseCenter, 60, gy + 0.1, 0.2, color:Lerp(LANE, 0.75), Enum.Material.Slate)
 		disc(map, team .. "Fountain", fountain, Config.FountainRadius, gy + 0.2, 0.3, color, Enum.Material.Neon, 0.55)
 		make("Part", {
 			Name = team .. "FountainPillar",
@@ -124,6 +190,36 @@ function MapBuilder.build()
 		end
 	end
 
+	-- Lane lamps (alternating sides), rocks and bushes.
+	local props = Instance.new("Folder")
+	props.Name = "Props"
+	props.Parent = map
+	for _, path in pairs(MapData.Lanes) do
+		local length = MapData.PathLength(path)
+		local side = 1
+		for d = 35, length - 35, 70 do
+			local p = MapData.PointAlong(path, d / length)
+			local ahead = MapData.PointAlong(path, math.min(1, (d + 1) / length))
+			local dir = (ahead - p).Magnitude > 0 and (ahead - p).Unit or Vector3.new(1, 0, 0)
+			local pos = p + Vector3.new(-dir.Z, 0, dir.X) * (w / 2 + 3) * side
+			side = -side
+			if math.abs(pos.X - pos.Z) / math.sqrt(2) > 18 and (pos - MapData.Nexus.Blue).Magnitude > 40 and (pos - MapData.Nexus.Red).Magnitude > 40 then
+				lamp(props, pos)
+			end
+		end
+	end
+	for _ = 1, 260 do
+		local p = Vector3.new(rng:NextNumber(-half + 10, half - 10), 0, rng:NextNumber(-half + 10, half - 10))
+		local riverDist = math.abs(p.X - p.Z) / math.sqrt(2)
+		if MapData.DistToLanes(p) > w / 2 + 4 and riverDist > 16 then
+			if rng:NextNumber() < 0.4 then
+				rocks(props, p, rng)
+			else
+				bush(props, p, rng)
+			end
+		end
+	end
+
 	-- Invisible boundary walls
 	for _, side in ipairs({ { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }) do
 		local x, z = side[1], side[2]
@@ -137,9 +233,7 @@ function MapBuilder.build()
 
 	map.Parent = workspace
 
-	Lighting.ClockTime = 14
-	Lighting.Brightness = 2
-	Lighting.GlobalShadows = true
+	setupLighting()
 end
 
 function MapBuilder.clear()
@@ -147,6 +241,7 @@ function MapBuilder.clear()
 	if old then
 		old:Destroy()
 	end
+	workspace.Terrain:Clear()
 end
 
 return MapBuilder

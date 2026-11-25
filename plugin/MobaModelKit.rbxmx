@@ -496,6 +496,7 @@ Config.TeamColors = {
 }
 Config.TeamSize = 6
 Config.FillWithBots = true -- empty slots are filled with AI heroes
+Config.BotDamageMult = 0.55 -- bot heroes deal this fraction of normal damage (attacks and abilities)
 
 Config.GroundY = 0 -- top surface of the battlefield
 Config.MapHalfSize = 300
