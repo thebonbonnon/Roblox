@@ -121,6 +121,118 @@ stylized 3D game asset of [OBJECT PART], smooth rounded shapes, chunky proportio
 
 ---
 
+## Heroes (full characters)
+
+**Read this first:** these make great-looking heroes, but a single 3D model can't bend its arms and legs, so in game it would slide around stiffly instead of walking. Use these if you want the art (for thumbnails, a lobby, a hero-select screen), or if you later want me to switch the game to Roblox's automatic rigging. For heroes that animate today, use the **Hero weapons** section and the Model Kit plugin.
+
+Heroes use a **front view in A-pose** (arms slightly away from the body). Character 3D tools need that pose.
+
+### Knight
+**Image prompt**
+```
+stylized 3D game character of a heroic knight in shiny steel plate armor, blue tabard with a white cross, round helmet with a visor slit and a blue feather plume, big round shoulder armor, holding a straight longsword in the right hand and a blue kite shield on the left arm, standing in an A-pose with arms slightly away from the body, smooth rounded shapes, chunky toy-like proportions, clean hand-painted textures, soft bright colors, single character, centered, full body visible from head to feet, front view, plain white background, soft even studio lighting, no ground shadow, no text
+```
+**3D prompt**
+```
+armored knight with a plumed helmet, longsword and kite shield, stylized game character in A-pose, clean hand-painted texture
+```
+
+### Mage
+**Image prompt**
+```
+stylized 3D game character of an old wizard in a flowing purple robe with a blue sash, long white beard, tall crooked purple wizard hat with a gold star, holding a wooden staff topped with a glowing purple orb, standing in an A-pose with arms slightly away from the body, smooth rounded shapes, chunky toy-like proportions, clean hand-painted textures, soft bright colors, single character, centered, full body visible from head to feet, front view, plain white background, soft even studio lighting, no ground shadow, no text
+```
+**3D prompt**
+```
+old wizard with tall hat, white beard and glowing orb staff, stylized game character in A-pose, clean hand-painted texture
+```
+
+### Ranger
+**Image prompt**
+```
+stylized 3D game character of a hooded forest ranger in a green tunic with a leather belt and bracers, blue cape, quiver of arrows on the back, holding a wooden longbow, standing in an A-pose with arms slightly away from the body, smooth rounded shapes, chunky toy-like proportions, clean hand-painted textures, soft bright colors, single character, centered, full body visible from head to feet, front view, plain white background, soft even studio lighting, no ground shadow, no text
+```
+**3D prompt**
+```
+hooded green ranger with cape, quiver and longbow, stylized game character in A-pose, clean hand-painted texture
+```
+
+### Guardian
+**Image prompt**
+```
+stylized 3D game character of a huge tank warrior in heavy gold and bronze armor, horned helmet with a glowing blue visor slit, giant round gold shoulder pads with bone spikes, tall blue tower shield on the left arm, war hammer in the right hand, standing in an A-pose with arms slightly away from the body, smooth rounded shapes, chunky toy-like proportions, clean hand-painted textures, soft bright colors, single character, centered, full body visible from head to feet, front view, plain white background, soft even studio lighting, no ground shadow, no text
+```
+**3D prompt**
+```
+huge armored tank warrior with horned helmet, tower shield and war hammer, stylized game character in A-pose, clean hand-painted texture
+```
+
+### Assassin
+**Image prompt**
+```
+stylized 3D game character of a slim ninja assassin in dark grey cloth, hood and black face mask with glowing blue eyes, blue scarf with a long trailing tail, holding two short daggers, standing in an A-pose with arms slightly away from the body, smooth rounded shapes, chunky toy-like proportions, clean hand-painted textures, soft bright colors, single character, centered, full body visible from head to feet, front view, plain white background, soft even studio lighting, no ground shadow, no text
+```
+**3D prompt**
+```
+slim hooded ninja assassin with glowing eyes, scarf and two daggers, stylized game character in A-pose, clean hand-painted texture
+```
+
+### Gunslinger
+**Image prompt**
+```
+stylized 3D game character of a cowboy gunslinger in a long brown duster coat over a light shirt, wide-brim brown hat, blue bandana over the lower face, ammo belt with a grenade, holding a lever-action rifle, standing in an A-pose with arms slightly away from the body, smooth rounded shapes, chunky toy-like proportions, clean hand-painted textures, soft bright colors, single character, centered, full body visible from head to feet, front view, plain white background, soft even studio lighting, no ground shadow, no text
+```
+**3D prompt**
+```
+cowboy gunslinger with duster coat, wide hat, bandana and rifle, stylized game character in A-pose, clean hand-painted texture
+```
+
+## Map decorations (optional)
+
+These replace nothing automatically. They're for decorating the map yourself in Studio, or ask me to hook them up like the other models.
+
+### Fountain
+**Image prompt**
+```
+stylized 3D game asset of a magical healing fountain, round white marble basin with glowing blue water, a tall glowing crystal pillar in the middle, small gold trim, smooth rounded shapes, chunky toy-like proportions, clean hand-painted textures, soft bright colors, single object, centered, entire object visible, three-quarter view, plain white background, soft even studio lighting, no ground shadow, no text
+```
+**3D prompt**
+```
+round marble fountain with glowing water and a crystal pillar, smooth stylized game asset, clean hand-painted texture
+```
+
+### Lamp post
+**Image prompt**
+```
+stylized 3D game asset of a fantasy street lamp post, thin dark iron pole with a round base, a glowing warm orange lantern on top, smooth rounded shapes, chunky toy-like proportions, clean hand-painted textures, soft bright colors, single object, centered, entire object visible, three-quarter view, plain white background, soft even studio lighting, no ground shadow, no text
+```
+**3D prompt**
+```
+dark iron lamp post with a glowing lantern, smooth stylized game asset, clean hand-painted texture
+```
+
+### Rock
+**Image prompt**
+```
+stylized 3D game asset of a cluster of three smooth rounded grey boulders of different sizes, smooth rounded shapes, chunky toy-like proportions, clean hand-painted textures, soft bright colors, single object, centered, entire object visible, three-quarter view, plain white background, soft even studio lighting, no ground shadow, no text
+```
+**3D prompt**
+```
+cluster of smooth rounded grey boulders, smooth stylized game asset, clean hand-painted texture
+```
+
+### Bush
+**Image prompt**
+```
+stylized 3D game asset of a round leafy green bush made of three puffy leaf clumps, smooth rounded shapes, chunky toy-like proportions, clean hand-painted textures, soft bright colors, single object, centered, entire object visible, three-quarter view, plain white background, soft even studio lighting, no ground shadow, no text
+```
+**3D prompt**
+```
+round puffy green bush, smooth stylized game asset, clean hand-painted texture
+```
+
+---
+
 ## Put it in the game
 
 **Structures, minions, tree:**
